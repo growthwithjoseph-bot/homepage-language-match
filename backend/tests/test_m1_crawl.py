@@ -23,6 +23,26 @@ def test_is_content_url_filters_assets_and_offdomain():
     assert not is_content_url("https://other.com/blog/post", h)
 
 
+def test_is_content_url_excludes_careers_and_legal():
+    from backend.config import config
+    from backend.pipeline.discover import build_exclude_regex
+
+    h = "example.com"
+    ex = build_exclude_regex(config.exclude_url_patterns)
+    # careers / hiring
+    assert not is_content_url("https://example.com/careers", h, ex)
+    assert not is_content_url("https://example.com/en-au/jobs/paris", h, ex)
+    assert not is_content_url("https://example.com/about/hiring", h, ex)
+    assert not is_content_url("https://example.com/life-at-example", h, ex)
+    # legal / terms
+    assert not is_content_url("https://example.com/terms-of-service", h, ex)
+    assert not is_content_url("https://example.com/legal/privacy-policy", h, ex)
+    assert not is_content_url("https://example.com/cookies", h, ex)
+    # real content still passes
+    assert is_content_url("https://example.com/blog/project-planning", h, ex)
+    assert is_content_url("https://example.com/product/timeline", h, ex)
+
+
 def test_extract_page_from_html():
     body = " ".join(
         ["Gantt charts help teams plan project timelines and milestones."] * 12

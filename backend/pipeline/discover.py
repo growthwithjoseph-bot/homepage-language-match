@@ -43,8 +43,21 @@ def registrable_host(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def is_content_url(url: str, base_host: str) -> bool:
-    """Keep on-domain http(s) URLs that look like real content pages."""
+def build_exclude_regex(patterns) -> Optional["re.Pattern"]:
+    """Compile path-stem patterns into one regex (matches a stem starting a
+    path segment, e.g. '/careers', '/en/jobs/1', '/terms-of-service')."""
+    if not patterns:
+        return None
+    alt = "|".join(re.escape(p) for p in patterns)
+    return re.compile(r"(?:^|/)(?:%s)(?:[-/?#]|$)" % alt, re.IGNORECASE)
+
+
+def is_content_url(url: str, base_host: str, exclude_re: Optional["re.Pattern"] = None) -> bool:
+    """Keep on-domain http(s) URLs that look like real content pages.
+
+    Drops assets/boilerplate, off-domain links, and anything matching the
+    exclude patterns (careers/hiring, legal/terms — see config).
+    """
     try:
         p = urlparse(url)
     except ValueError:
@@ -54,6 +67,8 @@ def is_content_url(url: str, base_host: str) -> bool:
     if registrable_host(url) != base_host:
         return False
     if _NON_CONTENT_PAT.search(url):
+        return False
+    if exclude_re is not None and exclude_re.search(p.path or ""):
         return False
     return True
 
@@ -124,6 +139,7 @@ def discover_urls(
         cap = max_pages
     base = normalize_base(domain)
     base_host = registrable_host(base)
+    exclude_re = build_exclude_regex(cfg.exclude_url_patterns)
 
     candidates = _from_sitemaps(base)
     if not candidates:
@@ -135,7 +151,7 @@ def discover_urls(
     seen = set()
     out: List[str] = []
     for u in candidates:
-        if u in seen or not is_content_url(u, base_host):
+        if u in seen or not is_content_url(u, base_host, exclude_re):
             continue
         seen.add(u)
         out.append(u)

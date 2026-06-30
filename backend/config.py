@@ -54,6 +54,29 @@ def _env_bool(key: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_list(key: str, default: tuple) -> tuple:
+    raw = os.getenv(key)
+    if raw is None or raw == "":
+        return default
+    return tuple(s.strip().lower() for s in raw.split(",") if s.strip())
+
+
+# Path-segment stems for pages that aren't topical content — careers/hiring and
+# legal/terms. A URL is dropped if any stem starts a path segment (so "/careers",
+# "/en/jobs/123", "/terms-of-service", "/privacy-policy" all match). Override or
+# extend via TC_EXCLUDE_URL_PATTERNS (comma-separated).
+DEFAULT_EXCLUDE_PATTERNS = (
+    # careers / hiring
+    "careers", "career", "jobs", "job", "hiring", "hire", "vacancy", "vacancies",
+    "opening", "openings", "join-us", "work-with-us", "recruiting", "recruitment",
+    "employment", "internship", "internships", "life-at", "apply",
+    # legal / terms
+    "terms", "tos", "terms-of-service", "terms-and-conditions", "privacy",
+    "privacy-policy", "legal", "cookie", "cookies", "gdpr", "dpa", "eula",
+    "disclaimer", "imprint",
+)
+
+
 # Project root = the repo dir (parent of backend/).
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -85,6 +108,12 @@ class Config:
     )
     respect_robots: bool = field(
         default_factory=lambda: _env_bool("TC_RESPECT_ROBOTS", True)
+    )
+    # Pages to never crawl/compare (careers, legal, etc.) — see notes above.
+    exclude_url_patterns: tuple = field(
+        default_factory=lambda: _env_list(
+            "TC_EXCLUDE_URL_PATTERNS", DEFAULT_EXCLUDE_PATTERNS
+        )
     )
     # Per-domain wall-clock budget for crawling. Once exceeded, remaining URLs
     # are skipped so one slow/huge site can't stall a run. 0 = no time limit.
