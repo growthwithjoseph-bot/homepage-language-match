@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Topic Coverage</title>
+<style>
+  :root {
+    --only_you: #15803d; --you_lead: #22c55e; --even: #94a3b8;
+    --comp_lead: #fb923c; --only_comp: #ef4444; --category: #64748b;
+    --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; --bg: #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: #fff; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .controls { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls input { width: 70px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .controls button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--ink); color: #fff; cursor: pointer; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 24px;
+    border-bottom: 1px solid var(--line); background: #fff; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr); gap: 8px; }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+  #map { padding: 12px; min-height: 200px; }
+  #map .muted { color: var(--muted); padding: 40px; text-align: center; }
+
+  /* detail panel */
+  #detail { padding: 20px 24px; border-left: 1px solid var(--line); background: #fff; min-height: 70vh; }
+  #detail .empty { color: var(--muted); margin-top: 40px; text-align: center; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; color: #fff;
+    font-size: 12px; font-weight: 700; text-transform: capitalize; }
+  #detail h2 { margin: 12px 0 2px; font-size: 20px; }
+  #detail .cat { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+  .sharebar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 8px 0 4px;
+    border: 1px solid var(--line); font-size: 12px; font-weight: 700; color: #fff; }
+  .sharebar .you { background: #22c55e; display: flex; align-items: center; justify-content: center; }
+  .sharebar .comp { background: #fb923c; display: flex; align-items: center; justify-content: center; }
+  .sharelabels { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 22px; }
+  @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+  .cols h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    margin: 0 0 10px; }
+  .ev { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .ev p { margin: 0 0 8px; font-size: 13px; }
+  .ev a { font-size: 12px; color: #2563eb; text-decoration: none; }
+  .ev a:hover { text-decoration: underline; }
+  .ev mark { background: #fef08a; padding: 0 1px; border-radius: 2px; }
+  .ev-domain { font-size: 11px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  .col-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+  .section-title { margin: 24px 0 0; font-size: 13px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Topic Coverage</h1>
+    <p>Who covers what, and who covers it more — a pure content comparison.</p>
+    <div class="controls">
+      <label for="runId">Run</label>
+      <input id="runId" type="number" min="1" value="1" />
+      <button id="loadBtn">Load map</button>
+      <span id="status" style="color:var(--muted);font-size:12.5px;"></span>
+    </div>
+  </header>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--only_you)"></i> Only you</span>
+    <span><i class="dot" style="background:var(--you_lead)"></i> You lead</span>
+    <span><i class="dot" style="background:var(--even)"></i> Even</span>
+    <span><i class="dot" style="background:var(--comp_lead)"></i> Competitor leads</span>
+    <span><i class="dot" style="background:var(--only_comp)"></i> Only competitor</span>
+    <span><i class="dot" style="background:var(--category)"></i> Category</span>
+  </div>
+
+  <div class="wrap">
+    <div id="map"><div class="muted">Loading map…</div></div>
+    <aside id="detail"><div class="empty">Click a topic to see the content detected on it.</div></aside>
+  </div>
+
+  <script src="radial-map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

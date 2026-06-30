@@ -1,0 +1,46 @@
+{
+  "own_domain": "asana.com",
+  "competitors": ["monday.com", "clickup.com", "notion.so"],
+  "categories": [
+    {
+      "id": "c1",
+      "label": "Planning & scheduling",
+      "topics": [
+        { "id": "t1",  "label": "Gantt charts",      "state": "you_lead",  "you_pct": 60, "competitors_pct": 40 },
+        { "id": "t2",  "label": "Timelines",         "state": "you_lead",  "you_pct": 58, "competitors_pct": 42 },
+        { "id": "t3",  "label": "Milestones",        "state": "only_you",  "you_pct": 100, "competitors_pct": 0 },
+        { "id": "t4",  "label": "Capacity planning", "state": "only_comp", "you_pct": 0,  "competitors_pct": 100 },
+        { "id": "t5",  "label": "Resource mgmt",     "state": "comp_lead", "you_pct": 35, "competitors_pct": 65 }
+      ]
+    },
+    {
+      "id": "c2",
+      "label": "Integrations & API",
+      "topics": [
+        { "id": "t6",  "label": "Slack",       "state": "you_lead",  "you_pct": 62, "competitors_pct": 38 },
+        { "id": "t7",  "label": "Public API",  "state": "only_comp", "you_pct": 0,  "competitors_pct": 100 },
+        { "id": "t8",  "label": "Webhooks",    "state": "comp_lead", "you_pct": 33, "competitors_pct": 67 },
+        { "id": "t9",  "label": "Zapier",      "state": "even",      "you_pct": 50, "competitors_pct": 50 }
+      ]
+    },
+    {
+      "id": "c3",
+      "label": "AI & intelligence",
+      "topics": [
+        { "id": "t10", "label": "Smart summaries", "state": "comp_lead", "you_pct": 35, "competitors_pct": 65 },
+        { "id": "t11", "label": "AI search",       "state": "comp_lead", "you_pct": 30, "competitors_pct": 70 },
+        { "id": "t12", "label": "Auto-prioritise", "state": "even",      "you_pct": 50, "competitors_pct": 50 }
+      ]
+    },
+    {
+      "id": "c4",
+      "label": "Use-cases & templates",
+      "topics": [
+        { "id": "t13", "label": "Templates",   "state": "only_you",  "you_pct": 100, "competitors_pct": 0 },
+        { "id": "t14", "label": "Onboarding",  "state": "only_you",  "you_pct": 100, "competitors_pct": 0 },
+        { "id": "t15", "label": "Agencies",    "state": "comp_lead", "you_pct": 30, "competitors_pct": 70 },
+        { "id": "t16", "label": "Mobile app",  "state": "even",      "you_pct": 50, "competitors_pct": 50 }
+      ]
+    }
+  ]
+}
