@@ -15,6 +15,7 @@ from .chunk_embed import embed_run
 from .discover import discover_urls
 from .extract import extract_page
 from .fetch import fetch_all
+from .topics import discover_topics
 
 
 # --- DB write helpers -------------------------------------------------------
@@ -147,6 +148,11 @@ def run_pipeline(
         n_chunks = embed_run(run_id, cfg=cfg)
         print(f"  embedded {n_chunks} chunks")
         set_run_status(run_id, "embedded", cfg=cfg)
+
+        # M3 — discover topics + categories over all chunks (global).
+        n_topics, n_cats = discover_topics(run_id, cfg=cfg)
+        print(f"  discovered {n_topics} topics in {n_cats} categories")
+        set_run_status(run_id, "topiced", cfg=cfg)
     except Exception:
         set_run_status(run_id, "error", cfg=cfg)
         raise
