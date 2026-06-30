@@ -13,14 +13,108 @@ const mapEl = document.getElementById('map');
 const detailEl = document.getElementById('detail');
 const statusEl = document.getElementById('status');
 const runInput = document.getElementById('runId');
+const progressEl = document.getElementById('progress');
+const analyzeBtn = document.getElementById('analyzeBtn');
 
 let currentRunId = null;
 let usingSample = false;       // sample mode: no /topics endpoint
 let topicsById = {};           // cache nodes from the map for sample-mode detail
+let pollTimer = null;
 
 function apiBase() {
   // When served by FastAPI we share its origin; over file:// there's no API.
   return location.protocol === 'file:' ? null : location.origin;
+}
+
+// --- starting a new analysis (crawl + categorise) ---------------------------
+
+// Pipeline stages, in order, mapped to the backend's run status values.
+const STAGES = [
+  { status: 'running',  label: 'Crawling pages' },
+  { status: 'crawled',  label: 'Embedding content' },
+  { status: 'embedded', label: 'Discovering topics' },
+  { status: 'topiced',  label: 'Scoring coverage' },
+  { status: 'done',     label: 'Done' },
+];
+
+function stageIndex(status) {
+  const i = STAGES.findIndex(s => s.status === status);
+  return i < 0 ? 0 : i;
+}
+
+async function startAnalysis(ownDomain, competitors, maxPages) {
+  const base = apiBase();
+  if (!base) {
+    statusEl.textContent = 'Open this page via the running server (make dev), not as a file.';
+    return;
+  }
+  analyzeBtn.disabled = true;
+  detailEl.innerHTML = '<div class="empty">Analyzing… the map appears when the run finishes.</div>';
+  mapEl.innerHTML = '<div class="muted">Crawling and categorising content…</div>';
+  statusEl.textContent = '';
+  try {
+    const res = await fetch(`${base}/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        own_domain: ownDomain,
+        competitor_domains: competitors,
+        max_pages_per_domain: maxPages,
+      }),
+    });
+    if (!res.ok) throw new Error(`start failed (${res.status})`);
+    const { run_id } = await res.json();
+    currentRunId = run_id;
+    runInput.value = run_id;
+    history.replaceState(null, '', `?run=${run_id}`);
+    pollRun(run_id);
+  } catch (err) {
+    analyzeBtn.disabled = false;
+    statusEl.textContent = err.message;
+    mapEl.innerHTML = `<div class="muted">Could not start the run.<br>${esc(err.message)}</div>`;
+  }
+}
+
+function renderProgress(status, counts, errored) {
+  const idx = stageIndex(status);
+  const pct = errored ? 100 : Math.round((idx / (STAGES.length - 1)) * 100);
+  progressEl.hidden = false;
+  progressEl.classList.toggle('error', !!errored);
+  const steps = STAGES.slice(0, -1).map((s, i) => {
+    const cls = errored ? '' : i < idx ? 'done' : i === idx ? 'active' : '';
+    return `<span class="${cls}">${s.label}</span>`;
+  }).join('');
+  const c = counts || {};
+  progressEl.innerHTML = `
+    <div class="bar"><span style="width:${pct}%"></span></div>
+    <div class="steps">${steps}</div>
+    <div class="counts">${errored ? '⚠ run failed — check the server logs'
+      : `${c.domains || 0} domains · ${c.pages || 0} pages · ${c.chunks || 0} chunks · ${c.topics || 0} topics`}</div>`;
+}
+
+async function pollRun(runId) {
+  const base = apiBase();
+  if (pollTimer) clearTimeout(pollTimer);
+  try {
+    const r = await fetch(`${base}/runs/${runId}`);
+    if (!r.ok) throw new Error(`run ${r.status}`);
+    const info = await r.json();
+    if (info.status === 'error') {
+      renderProgress(info.status, info.counts, true);
+      analyzeBtn.disabled = false;
+      return;
+    }
+    renderProgress(info.status, info.counts, false);
+    if (info.status === 'done') {
+      analyzeBtn.disabled = false;
+      await loadMap(runId);
+      setTimeout(() => { progressEl.hidden = true; }, 1500);
+      return;
+    }
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+  pollTimer = setTimeout(() => pollRun(runId), 2000);
 }
 
 async function loadMap(runId) {
@@ -150,9 +244,42 @@ function esc(s) {
 
 // --- boot -------------------------------------------------------------------
 
-document.getElementById('loadBtn').addEventListener('click', () =>
-  loadMap(parseInt(runInput.value, 10) || 1));
+document.getElementById('analyzeForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const own = document.getElementById('ownDomain').value.trim();
+  if (!own) return;
+  const comps = document.getElementById('compDomains').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const maxPages = parseInt(document.getElementById('maxPages').value, 10) || 40;
+  startAnalysis(own, comps, maxPages);
+});
 
+document.getElementById('loadBtn').addEventListener('click', () => {
+  const id = parseInt(runInput.value, 10);
+  if (id) loadMap(id);
+});
+
+// Deep-link: ?run=N loads (or resumes polling for) that run. Otherwise wait
+// for the user to enter a domain and click Analyze.
 const qsRun = new URLSearchParams(location.search).get('run');
-if (qsRun) runInput.value = qsRun;
-loadMap(parseInt(runInput.value, 10) || 1);
+if (qsRun) {
+  runInput.value = qsRun;
+  resumeOrLoad(parseInt(qsRun, 10));
+} else {
+  mapEl.innerHTML = '<div class="muted">Enter your domain and competitors above, then click Analyze.</div>';
+}
+
+// If the linked run is still processing, show progress; if done, show the map.
+async function resumeOrLoad(runId) {
+  const base = apiBase();
+  if (!base) { loadMap(runId); return; }
+  try {
+    const info = await (await fetch(`${base}/runs/${runId}`)).json();
+    if (info.status && info.status !== 'done' && info.status !== 'error') {
+      currentRunId = runId;
+      pollRun(runId);
+      return;
+    }
+  } catch (e) { /* fall through to a plain map load */ }
+  loadMap(runId);
+}
