@@ -157,6 +157,149 @@ def blob_to_embedding(blob: Optional[bytes]) -> Optional[np.ndarray]:
     return np.frombuffer(blob, dtype=np.float32)
 
 
+# --- read helpers for the API (SPEC §8) -------------------------------------
+
+import json as _json
+import re as _re
+
+
+def _snippet(text: str, max_chars: int = 240) -> str:
+    """A short representative passage of a chunk (the 'matched sentence')."""
+    if not text:
+        return ""
+    # drop markdown heading lines, collapse whitespace
+    body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    body = _re.sub(r"\s+", " ", body).strip() or text.strip()
+    sentences = _re.split(r"(?<=[.!?])\s+", body)
+    out = sentences[0] if sentences else body
+    if len(out) < 40 and len(sentences) > 1:  # too short -> add the next one
+        out = " ".join(sentences[:2])
+    return out[:max_chars].strip()
+
+
+def run_counts(conn: sqlite3.Connection, run_id: int) -> dict:
+    def one(sql: str) -> int:
+        return conn.execute(sql, (run_id,)).fetchone()[0]
+
+    return {
+        "domains": one("SELECT COUNT(*) FROM domains WHERE run_id=?"),
+        "pages": one(
+            "SELECT COUNT(*) FROM pages WHERE domain_id IN "
+            "(SELECT id FROM domains WHERE run_id=?)"
+        ),
+        "chunks": one("SELECT COUNT(*) FROM chunks WHERE run_id=?"),
+        "topics": one("SELECT COUNT(*) FROM topics WHERE run_id=?"),
+        "categories": one("SELECT COUNT(*) FROM categories WHERE run_id=?"),
+    }
+
+
+def build_map(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
+    """Assemble the category→topic tree with states + shares (SPEC §8 /map)."""
+    conn = get_connection(db_path)
+    try:
+        run = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        if run is None:
+            return None
+        rows = conn.execute(
+            """SELECT cat.id cat_id, cat.label cat_label,
+                      t.id topic_id, t.label topic_label,
+                      ts.state, ts.you_pct, ts.competitors_pct
+               FROM categories cat
+               LEFT JOIN topics t ON t.category_id = cat.id
+               LEFT JOIN topic_state ts ON ts.topic_id = t.id
+               WHERE cat.run_id = ?
+               ORDER BY cat.id, t.id""",
+            (run_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    cats: dict = {}
+    order: list = []
+    for r in rows:
+        cid = r["cat_id"]
+        if cid not in cats:
+            cats[cid] = {"id": cid, "label": r["cat_label"], "topics": []}
+            order.append(cid)
+        if r["topic_id"] is not None:
+            cats[cid]["topics"].append(
+                {
+                    "id": r["topic_id"],
+                    "label": r["topic_label"],
+                    "state": r["state"] or "even",
+                    "you_pct": r["you_pct"] if r["you_pct"] is not None else 0,
+                    "competitors_pct": r["competitors_pct"]
+                    if r["competitors_pct"] is not None
+                    else 0,
+                }
+            )
+
+    return {
+        "run_id": run_id,
+        "status": run["status"],
+        "own_domain": run["own_domain"],
+        "competitors": _json.loads(run["competitor_domains_json"] or "[]"),
+        "categories": [cats[c] for c in order],
+    }
+
+
+def build_topic_detail(
+    run_id: int, topic_id: int, db_path: Optional[Path] = None, per_domain: int = 5
+) -> Optional[dict]:
+    """Per-topic detail + detected content per domain (SPEC §8 /topics/{id})."""
+    conn = get_connection(db_path)
+    try:
+        head = conn.execute(
+            """SELECT t.label, c.label category, ts.state, ts.you_pct, ts.competitors_pct
+               FROM topics t
+               LEFT JOIN categories c ON c.id = t.category_id
+               LEFT JOIN topic_state ts ON ts.topic_id = t.id
+               WHERE t.id = ? AND t.run_id = ?""",
+            (topic_id, run_id),
+        ).fetchone()
+        if head is None:
+            return None
+        rows = conn.execute(
+            """SELECT d.domain, d.is_own, p.url, p.title, ch.text
+               FROM chunks ch
+               JOIN pages p ON p.id = ch.page_id
+               JOIN domains d ON d.id = ch.domain_id
+               WHERE ch.run_id = ? AND ch.topic_id = ?
+               ORDER BY d.is_own DESC, d.id""",
+            (run_id, topic_id),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    own: list = []
+    competitors: list = []
+    seen_own = 0
+    per_comp: dict = {}
+    for r in rows:
+        item = {"sentence": _snippet(r["text"]), "url": r["url"], "title": r["title"]}
+        if r["is_own"]:
+            if seen_own < per_domain:
+                own.append(item)
+                seen_own += 1
+        else:
+            dom = r["domain"]
+            if per_comp.get(dom, 0) < per_domain:
+                competitors.append({"domain": dom, **item})
+                per_comp[dom] = per_comp.get(dom, 0) + 1
+
+    return {
+        "id": topic_id,
+        "label": head["label"],
+        "category": head["category"],
+        "state": head["state"] or "even",
+        "you_pct": head["you_pct"] if head["you_pct"] is not None else 0,
+        "competitors_pct": head["competitors_pct"]
+        if head["competitors_pct"] is not None
+        else 0,
+        "detected": {"own": own, "competitors": competitors},
+    }
+
+
 if __name__ == "__main__":  # `python -m backend.db` initialises the DB
     p = init_db()
     print(f"Initialised DB at {p}")

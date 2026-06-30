@@ -128,17 +128,22 @@ def crawl_domain(
     return _store_pages(domain_id, pages, cfg)
 
 
-def run_pipeline(
-    own_domain: str,
-    competitor_domains: List[str],
-    market_language: Optional[str] = None,
-    max_pages: Optional[int] = None,
-    cfg: Config = config,
-) -> int:
-    """Create a run and crawl every domain (M1). M2–M4 wire in here later."""
-    lang = market_language or cfg.default_market_language
-    cap = max_pages if max_pages is not None else cfg.max_pages_per_domain
-    run_id = create_run(own_domain, competitor_domains, lang, cap, cfg=cfg)
+def get_run(run_id: int, cfg: Config = config):
+    conn = get_connection(cfg.db_path)
+    try:
+        return conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+    finally:
+        conn.close()
+
+
+def execute_run(run_id: int, cfg: Config = config) -> int:
+    """Run all pipeline stages (M1→M4) for an already-created run."""
+    run = get_run(run_id, cfg=cfg)
+    if run is None:
+        raise ValueError(f"run {run_id} not found")
+    lang = run["market_language"]
+    cap = run["max_pages"]
+    set_run_status(run_id, "running", cfg=cfg)
     try:
         for d in get_domains(run_id, cfg=cfg):
             n = crawl_domain(d["id"], d["domain"], lang, max_pages=cap, cfg=cfg)
@@ -163,6 +168,20 @@ def run_pipeline(
         set_run_status(run_id, "error", cfg=cfg)
         raise
     return run_id
+
+
+def run_pipeline(
+    own_domain: str,
+    competitor_domains: List[str],
+    market_language: Optional[str] = None,
+    max_pages: Optional[int] = None,
+    cfg: Config = config,
+) -> int:
+    """Create a run and execute the full pipeline (M1→M4) synchronously."""
+    lang = market_language or cfg.default_market_language
+    cap = max_pages if max_pages is not None else cfg.max_pages_per_domain
+    run_id = create_run(own_domain, competitor_domains, lang, cap, cfg=cfg)
+    return execute_run(run_id, cfg=cfg)
 
 
 # --- CLI (make crawl DOMAIN=example.com) ------------------------------------
