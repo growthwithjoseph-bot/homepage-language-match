@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topic-coverage"
+version = "0.1.0"
+description = "Crawl a brand and its competitors, discover topics, and map who covers what."
+readme = "README.md"
+requires-python = ">=3.9"
+
+# Core dependencies needed to boot the API + run the pipeline.
+# Heavy ML deps (BERTopic stack) are isolated in the [ml] extra so M0–M1
+# stay light; install them when you reach M2/M3.
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "python-dotenv>=1.0",
+    "httpx[http2]>=0.27",
+    "trafilatura>=1.8",
+    "lingua-language-detector>=2.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Embeddings + topic discovery (M2–M3). Heavy; install when needed.
+ml = [
+    "sentence-transformers>=2.7",
+    "bertopic>=0.16",
+    "umap-learn>=0.5",
+    "hdbscan>=0.8.33",
+    "scikit-learn>=1.4",
+]
+# JS-rendered page fallback (M1, optional).
+playwright = [
+    "playwright>=1.43",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+packages = ["backend", "backend.pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
