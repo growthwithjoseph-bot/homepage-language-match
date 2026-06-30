@@ -177,8 +177,17 @@ class Config:
     openai_api_key: str = field(
         default_factory=lambda: _env_str("OPENAI_API_KEY", "")
     )
+    anthropic_api_key: str = field(
+        default_factory=lambda: _env_str("ANTHROPIC_API_KEY", "")
+    )
+    # LLM topic/category labels (optional). Off by default so the repo runs with
+    # no keys; when on AND a key is present, topics.py names clusters with a
+    # model instead of term-based labels. Model is overridable.
     llm_labels: bool = field(
         default_factory=lambda: _env_bool("TC_LLM_LABELS", False)
+    )
+    llm_model: str = field(
+        default_factory=lambda: _env_str("TC_LLM_MODEL", "claude-opus-4-8")
     )
 
     # --- language ---

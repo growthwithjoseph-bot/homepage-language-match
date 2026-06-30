@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -104,6 +105,89 @@ def _terms_to_label(terms: List[str], k: int = 3) -> str:
     if not words:
         return "Topic"
     return " ".join(_cap(w) for w in words[:k])
+
+
+# --- optional LLM labelling (Anthropic) -------------------------------------
+# Off by default. Activates only when cfg.llm_labels AND an API key is present;
+# any failure falls back silently to the term-based labels above, so the repo
+# always runs with no keys.
+
+_LLM_LABEL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "labels": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "label": {"type": "string"},
+                },
+                "required": ["index", "label"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["labels"],
+    "additionalProperties": False,
+}
+
+
+def _llm_enabled(cfg: Config) -> bool:
+    return bool(cfg.llm_labels) and bool(os.getenv("ANTHROPIC_API_KEY") or cfg.anthropic_api_key)
+
+
+def _llm_labels(prompt: str, cfg: Config) -> Dict[int, str]:
+    """One structured-output call -> {index: label}. {} on any failure."""
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=cfg.llm_model,
+            max_tokens=2048,
+            output_config={"format": {"type": "json_schema", "schema": _LLM_LABEL_SCHEMA}},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = next((b.text for b in resp.content if b.type == "text"), "")
+        data = json.loads(text)
+        out: Dict[int, str] = {}
+        for item in data.get("labels", []):
+            label = (item.get("label") or "").strip()
+            if label:
+                out[int(item["index"])] = label
+        return out
+    except Exception:
+        return {}
+
+
+def _llm_label_topics(topic_objs: List[dict], cfg: Config) -> Dict[int, str]:
+    blocks = []
+    for i, t in enumerate(topic_objs):
+        terms = ", ".join(t["terms"][:8])
+        sample = (t.get("sample") or "").replace("\n", " ")[:300]
+        blocks.append(f"{i}. terms: {terms}\n   sample: {sample}")
+    prompt = (
+        "These are content clusters discovered from crawling websites. For each "
+        "numbered cluster, give a concise, human-readable topic label of 2-4 words "
+        "in Title Case (e.g. 'Gantt Charts', 'Public API & Webhooks', 'Health "
+        "Insurance'). Base it on the key terms and the sample text. Return exactly "
+        "one label per index.\n\n" + "\n\n".join(blocks)
+    )
+    return _llm_labels(prompt, cfg)
+
+
+def _llm_label_categories(cat_to_labels: Dict[int, List[str]], cfg: Config) -> Dict[int, str]:
+    keys = sorted(cat_to_labels.keys())
+    blocks = [f"{n}. topics: {', '.join(cat_to_labels[k][:12])}" for n, k in enumerate(keys)]
+    prompt = (
+        "Each numbered group below is a set of related content topics. Give each "
+        "group a short category name of 1-3 words in Title Case that captures the "
+        "common theme (e.g. 'Planning & Scheduling', 'Integrations', 'AI "
+        "Features'). Return exactly one name per index.\n\n" + "\n".join(blocks)
+    )
+    by_index = _llm_labels(prompt, cfg)
+    return {keys[i]: lab for i, lab in by_index.items() if 0 <= i < len(keys)}
 
 
 def _load_chunks(run_id: int, cfg: Config):
@@ -294,23 +378,37 @@ def discover_topics(run_id: int, cfg: Config = config) -> Tuple[int, int]:
         sims.sort(reverse=True)
         rep_ids = [cid_ for _, cid_ in sims[:3]]
         terms = top_terms.get(cid) or _fallback_terms([docs[i] for i in members])
+        id_to_doc = {ids[i]: docs[i] for i in members}
+        sample = " ".join(id_to_doc.get(r, "") for r in rep_ids[:2])
         topic_objs.append(
             {
                 "label": _terms_to_label(terms),
                 "terms": terms,
+                "sample": sample,
                 "centroid": centroid,
                 "member_chunk_ids": [ids[i] for i in members],
                 "rep_chunk_ids": rep_ids,
             }
         )
 
+    # Optional: replace term-based topic labels with LLM-generated ones.
+    if _llm_enabled(cfg):
+        for i, lab in _llm_label_topics(topic_objs, cfg).items():
+            if 0 <= i < len(topic_objs):
+                topic_objs[i]["label"] = lab
+
     cat_idx = _group_categories([t["centroid"] for t in topic_objs], cfg)
 
-    # Category labels from member topics' terms.
+    # Category labels from member topics' terms (LLM-upgraded if enabled).
     cat_terms: Dict[int, List[str]] = {}
+    cat_member_labels: Dict[int, List[str]] = {}
     for t, ci in zip(topic_objs, cat_idx):
         cat_terms.setdefault(ci, []).extend(t["terms"][:3])
+        cat_member_labels.setdefault(ci, []).append(t["label"])
     cat_labels = {ci: _terms_to_label(terms, k=2) for ci, terms in cat_terms.items()}
+    if _llm_enabled(cfg):
+        for ci, lab in _llm_label_categories(cat_member_labels, cfg).items():
+            cat_labels[ci] = lab
 
     _persist(run_id, topic_objs, cat_idx, cat_labels, cfg)
     return len(topic_objs), len(set(cat_idx))

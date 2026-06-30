@@ -22,6 +22,30 @@ def test_terms_to_label_normalises_readably():
     assert topics._terms_to_label([]) == "Topic"
 
 
+def test_llm_disabled_without_flag_or_key(monkeypatch):
+    from backend.config import Config
+
+    # flag off -> disabled regardless of key
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert topics._llm_enabled(Config(llm_labels=False)) is False
+    # flag on but no key -> disabled (repo stays key-free by default)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cfg = Config(llm_labels=True)
+    object.__setattr__(cfg, "anthropic_api_key", "")
+    assert topics._llm_enabled(cfg) is False
+    # flag on AND key present -> enabled
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert topics._llm_enabled(Config(llm_labels=True)) is True
+
+
+def test_llm_labels_failure_returns_empty(monkeypatch):
+    # any error in the call path (no key, SDK missing, network) degrades to {}
+    from backend.config import Config
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert topics._llm_labels("prompt", Config()) == {}
+
+
 def test_category_count_respects_band():
     cfg = Config()
     assert topics._category_count(1, cfg) == 1

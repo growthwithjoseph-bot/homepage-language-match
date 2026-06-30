@@ -36,6 +36,10 @@ ml = [
 playwright = [
     "playwright>=1.43",
 ]
+# LLM topic/category labels (optional upgrade — needs ANTHROPIC_API_KEY).
+llm = [
+    "anthropic>=0.69",
+]
 dev = [
     "pytest>=8.0",
 ]
