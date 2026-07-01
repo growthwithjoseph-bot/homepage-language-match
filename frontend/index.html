@@ -90,15 +90,32 @@
   .modal-close { border: 0; background: none; font-size: 16px; cursor: pointer;
     color: var(--muted); padding: 4px 8px; }
   .modal-body { padding: 8px 18px 18px; overflow-y: auto; }
-  .pg-group { margin-top: 14px; }
-  .pg-group h4 { margin: 0 0 6px; font-size: 13px; }
-  .pg-group h4 .pg-count { font-weight: 400; color: var(--muted); font-size: 12px; }
-  .pg-list { list-style: none; margin: 0; padding: 0; }
-  .pg-list li { padding: 5px 0; border-bottom: 1px solid var(--line); }
-  .pg-list a { display: flex; flex-direction: column; text-decoration: none; }
-  .pg-list a:hover .pg-title { text-decoration: underline; }
-  .pg-title { font-size: 13px; color: var(--ink); }
-  .pg-url { font-size: 11.5px; color: #2563eb; word-break: break-all; }
+  /* Scraped-pages sitemap tree (collapsible folders + linked pages). */
+  .tree-toolbar { display: flex; gap: 8px; padding: 4px 0 10px; position: sticky;
+    top: 0; background: #fff; z-index: 1; }
+  .tree-toolbar button { font-size: 12px; padding: 4px 11px; border: 1px solid var(--line);
+    border-radius: 999px; background: #fff; color: var(--ink); cursor: pointer; }
+  .tree-toolbar button:hover { background: #f8fafc; }
+  .tfolder > summary { list-style: none; cursor: pointer; display: flex; align-items: center;
+    gap: 8px; padding: 5px 6px; border-radius: 6px; font-size: 13px; }
+  .tfolder > summary::-webkit-details-marker { display: none; }
+  .tfolder > summary::before { content: "\25B8"; color: var(--muted); font-size: 10px;
+    transition: transform .12s ease; }
+  .tfolder[open] > summary::before { transform: rotate(90deg); }
+  .tfolder > summary:hover { background: #f8fafc; }
+  .tfolder .tname { font-weight: 600; color: var(--ink); }
+  .tfolder .tcount { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .tdomain { margin-top: 8px; }
+  .tdomain > summary .tname { font-weight: 700; }
+  .tkids { margin-left: 13px; border-left: 1px solid var(--line); padding-left: 6px; }
+  .tleaf { display: flex; align-items: baseline; gap: 10px; text-decoration: none;
+    padding: 4px 6px 4px 22px; border-radius: 6px; }
+  .tleaf:hover { background: #f8fafc; }
+  .tleaf:hover .tname { text-decoration: underline; }
+  .tleaf .tname { color: #2563eb; font-weight: 500; font-size: 12.5px; white-space: nowrap;
+    flex-shrink: 0; }
+  .tleaf-title { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 24px;
     border-bottom: 1px solid var(--line); background: #fff; font-size: 12.5px; color: var(--muted); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }

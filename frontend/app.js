@@ -216,7 +216,7 @@ function renderPagesAnalysed(domainPages) {
   if (btn) btn.addEventListener('click', openPagesModal);
 }
 
-// --- "all scraped pages" modal ---------------------------------------------
+// --- "all scraped pages" modal — a collapsible sitemap tree -----------------
 async function openPagesModal() {
   const base = apiBase();
   const modal = document.getElementById('pagesModal');
@@ -226,20 +226,75 @@ async function openPagesModal() {
   modal.hidden = false;
   try {
     const data = await (await fetch(`${base}/runs/${currentRunId}/pages`)).json();
-    body.innerHTML = (data.domains || []).map(d => {
-      const items = (d.pages || []).map(pg =>
-        `<li><a href="${esc(pg.url)}" target="_blank" rel="noopener" title="${esc(pg.url)}">`
-        + `<span class="pg-title">${esc(pg.title || pg.url)}</span>`
-        + `<span class="pg-url">${esc(prettyUrl(pg.url))}</span></a></li>`
-      ).join('') || '<li class="muted">No pages scraped for this domain.</li>';
-      return `<section class="pg-group">`
-        + `<h4>${esc(d.domain)} <span class="pg-count">${(d.pages || []).length} pages`
-        + `${d.is_own ? ' · you' : ' · competitor'}</span></h4>`
-        + `<ul class="pg-list">${items}</ul></section>`;
-    }).join('') || '<div class="muted">No pages.</div>';
+    const trees = (data.domains || []).map(renderDomainTree).join('')
+      || '<div class="muted">No pages.</div>';
+    body.innerHTML =
+      `<div class="tree-toolbar">`
+      + `<button type="button" data-tree="expand">Expand all</button>`
+      + `<button type="button" data-tree="collapse">Collapse all</button>`
+      + `</div><div class="tree">${trees}</div>`;
   } catch (e) {
     body.innerHTML = `<div class="muted">Could not load pages. ${esc(e.message)}</div>`;
   }
+}
+
+// Group a flat [{url,title}] list into a tree keyed by URL path segments, so a
+// URL like /en-gb/blogs/the-root/x nests folder-by-folder. A node can hold both
+// its own page (a URL ending exactly there) and child folders.
+function buildUrlTree(pages) {
+  const root = { seg: '', children: new Map(), page: null };
+  for (const pg of pages) {
+    let pathname;
+    try { pathname = new URL(pg.url).pathname; } catch { pathname = pg.url || ''; }
+    let node = root;
+    for (const s of pathname.split('/').filter(Boolean)) {
+      if (!node.children.has(s)) node.children.set(s, { seg: s, children: new Map(), page: null });
+      node = node.children.get(s);
+    }
+    node.page = pg;  // terminal page for this exact path (homepage -> root)
+  }
+  return root;
+}
+
+function treeCount(node) {  // pages in this subtree, including the node's own
+  let n = node.page ? 1 : 0;
+  for (const c of node.children.values()) n += treeCount(c);
+  return n;
+}
+
+function sortedChildren(node) {
+  return [...node.children.values()].sort((a, b) => a.seg.localeCompare(b.seg));
+}
+
+function treeLeaf(pg, label) {
+  return `<a class="tleaf" href="${esc(pg.url)}" target="_blank" rel="noopener" title="${esc(pg.url)}">`
+    + `<span class="tname">${esc(label)}</span>`
+    + (pg.title ? `<span class="tleaf-title">${esc(pg.title)}</span>` : '')
+    + `</a>`;
+}
+
+function treeNode(node) {
+  const label = '/' + node.seg;
+  if (node.children.size === 0) return treeLeaf(node.page, label);  // pure page
+  // folder — may also carry its own index page (e.g. /blogs is a page and a dir)
+  const self = node.page ? treeLeaf(node.page, label + ' (index)') : '';
+  const kids = sortedChildren(node).map(treeNode).join('');
+  return `<details class="tfolder"><summary>`
+    + `<span class="tname">${esc(label)}</span><span class="tcount">${treeCount(node)}</span>`
+    + `</summary><div class="tkids">${self}${kids}</div></details>`;
+}
+
+function renderDomainTree(d) {
+  const pages = d.pages || [];
+  const root = buildUrlTree(pages);
+  const home = root.page ? treeLeaf(root.page, '/') : '';
+  const inner = (home + sortedChildren(root).map(treeNode).join(''))
+    || '<div class="muted">No pages scraped for this domain.</div>';
+  const role = d.is_own ? '· you' : '· competitor';
+  return `<details class="tfolder tdomain" open><summary>`
+    + `<span class="tname">${esc(d.domain)}</span>`
+    + `<span class="tcount">${pages.length} pages ${role}</span>`
+    + `</summary><div class="tkids">${inner}</div></details>`;
 }
 
 function closePagesModal() {
@@ -358,11 +413,17 @@ document.getElementById('analyzeForm').addEventListener('submit', (e) => {
   startAnalysis(own, comps, maxPages);
 });
 
-// Close the "scraped pages" modal on backdrop click, the ✕, or Escape.
+// Close the "scraped pages" modal on backdrop click, the ✕, or Escape; and
+// wire the tree's Expand all / Collapse all buttons.
 const pagesModalEl = document.getElementById('pagesModal');
 if (pagesModalEl) {
   pagesModalEl.addEventListener('click', (e) => {
-    if (e.target.hasAttribute('data-close')) closePagesModal();
+    if (e.target.hasAttribute('data-close')) { closePagesModal(); return; }
+    const btn = e.target.closest('[data-tree]');
+    if (btn) {
+      const open = btn.dataset.tree === 'expand';
+      pagesModalEl.querySelectorAll('#pagesModalBody details').forEach(d => { d.open = open; });
+    }
   });
 }
 document.addEventListener('keydown', (e) => {
