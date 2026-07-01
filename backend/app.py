@@ -28,6 +28,7 @@ from .db import (
     build_map,
     build_topic_detail,
     domain_page_counts,
+    fail_orphaned_runs,
     get_connection,
     init_db,
     list_pages,
@@ -43,6 +44,11 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 async def lifespan(app: FastAPI):
     config.ensure_dirs()
     init_db()
+    # A restart kills any in-flight run's worker thread; fail those so the UI
+    # doesn't poll them forever (they can't be resumed).
+    orphaned = fail_orphaned_runs()
+    if orphaned:
+        print(f"  marked {orphaned} interrupted run(s) as error on startup")
     yield
 
 

@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 
 from backend import app as app_module
 from backend.config import config
-from backend.db import embedding_to_blob, get_connection, init_db
+from backend.db import (
+    embedding_to_blob,
+    fail_orphaned_runs,
+    get_connection,
+    init_db,
+)
 
 client = TestClient(app_module.app)
 
@@ -90,6 +95,35 @@ def test_map_and_topic_detail():
 
 def test_missing_run_404():
     assert client.get("/runs/999999/map").status_code == 404
+
+
+def test_fail_orphaned_runs_only_touches_in_flight():
+    init_db(config.db_path)
+    conn = get_connection(config.db_path)
+    try:
+        def mk(status):
+            return conn.execute(
+                "INSERT INTO runs (own_domain, competitor_domains_json, "
+                "market_language, max_pages, status) VALUES ('x.com','[]','en',10,?)",
+                (status,),
+            ).lastrowid
+        running, embedded = mk("running"), mk("embedded")
+        done, cancelled = mk("done"), mk("cancelled")
+        conn.commit()
+    finally:
+        conn.close()
+
+    fail_orphaned_runs(config.db_path)
+
+    conn = get_connection(config.db_path)
+    try:
+        status = dict(conn.execute("SELECT id, status FROM runs").fetchall())
+    finally:
+        conn.close()
+    assert status[running] == "error"      # in-flight -> failed
+    assert status[embedded] == "error"     # intermediate pipeline state -> failed
+    assert status[done] == "done"          # terminal states untouched
+    assert status[cancelled] == "cancelled"
 
 
 def test_pages_endpoint_lists_scraped_pages():

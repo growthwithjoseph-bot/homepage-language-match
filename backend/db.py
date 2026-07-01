@@ -147,6 +147,29 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE domains ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")
 
 
+# Statuses a run can rest in permanently. Anything else means a worker was
+# mid-flight; if the process is gone (e.g. server restart) the run is orphaned.
+TERMINAL_STATUSES = ("done", "error", "cancelled")
+
+
+def fail_orphaned_runs(db_path: Optional[Path] = None) -> int:
+    """Mark any non-terminal run as 'error'. Runs execute in a background thread,
+    so a server restart leaves in-flight runs stuck at 'running' forever with no
+    worker. Called on startup so the UI stops polling dead runs. Returns count."""
+    conn = get_connection(db_path)
+    try:
+        placeholders = ",".join("?" * len(TERMINAL_STATUSES))
+        cur = conn.execute(
+            f"UPDATE runs SET status='error', finished_at=datetime('now') "
+            f"WHERE status NOT IN ({placeholders})",
+            TERMINAL_STATUSES,
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def list_tables(conn: sqlite3.Connection) -> Iterable[str]:
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
