@@ -75,7 +75,6 @@ async function startAnalysis(ownDomain, competitors, maxPages) {
 
 function renderProgress(status, counts, domains, errored) {
   const idx = stageIndex(status);
-  const pct = errored ? 100 : Math.round((idx / (STAGES.length - 1)) * 100);
   progressEl.hidden = false;
   progressEl.classList.toggle('error', !!errored);
   const steps = STAGES.slice(0, -1).map((s, i) => {
@@ -83,15 +82,52 @@ function renderProgress(status, counts, domains, errored) {
     return `<span class="${cls}">${s.label}</span>`;
   }).join('');
   const c = counts || {};
-  const dchips = (domains || []).map(d =>
-    `<span class="dchip ${d.is_own ? 'own' : ''}">${esc(d.domain)} <b>${d.pages}</b> pages</span>`
-  ).join('');
+  const crawling = status === 'running';           // stage 0 = crawling pages
+  const doms = domains || [];
+  const detected = doms.reduce((s, d) => s + (d.discovered || 0), 0);
+  const scanned = doms.reduce((s, d) => s + (d.pages || 0), 0);
+
+  // Top bar: during the crawl it creeps across the first stage-segment in step
+  // with pages scanned; afterwards it snaps to the stage-based position.
+  const seg = 100 / (STAGES.length - 1);
+  let pct;
+  if (errored) pct = 100;
+  else if (crawling && detected > 0) pct = Math.round((scanned / detected) * seg);
+  else pct = Math.round((idx / (STAGES.length - 1)) * 100);
+
+  const rows = doms.map(d => domainScanRow(d, crawling)).join('');
+  const summary = errored ? '⚠ run failed — check the server logs'
+    : crawling ? `${scanned} of ${detected || '…'} detected pages scanned · ${c.chunks || 0} chunks`
+    : `${c.pages || 0} pages · ${c.chunks || 0} chunks · ${c.topics || 0} topics`;
+
   progressEl.innerHTML = `
     <div class="bar"><span style="width:${pct}%"></span></div>
     <div class="steps">${steps}</div>
-    <div class="counts">${errored ? '⚠ run failed — check the server logs'
-      : `${c.pages || 0} pages · ${c.chunks || 0} chunks · ${c.topics || 0} topics`}</div>
-    <div class="domains">${dchips}</div>`;
+    <div class="counts">${summary}</div>
+    <div class="dscan">${rows}</div>`;
+}
+
+// One per-domain scan bar: pages stored / pages discovered. While a domain is
+// still being discovered the denominator is unknown, so we show an
+// indeterminate bar; once the crawl stage passes, the scan is complete.
+function domainScanRow(d, crawling) {
+  const scanned = d.pages || 0;
+  const detected = d.discovered || 0;
+  const role = d.is_own ? 'you' : 'competitor';
+  const discovering = crawling && detected === 0 && scanned === 0;
+  const pctScan = detected > 0 ? Math.min(100, Math.round(scanned / detected * 100))
+    : (crawling ? 0 : 100);
+  const barCls = `dbar ${d.is_own ? 'own' : ''}` + (discovering ? ' indet' : '');
+  const count = discovering ? 'detecting pages…'
+    : detected > 0 ? `${scanned} / ${detected} scanned${crawling ? ` · ${pctScan}%` : ''}`
+    : `${scanned} pages`;
+  return `<div class="drow">
+    <div class="drow-top">
+      <span class="d-name">${esc(d.domain)} <span class="d-role">· ${role}</span></span>
+      <span class="d-count">${count}</span>
+    </div>
+    <div class="${barCls}"><span style="width:${pctScan}%"></span></div>
+  </div>`;
 }
 
 async function pollRun(runId) {
@@ -157,20 +193,58 @@ async function loadMap(runId) {
   }
 }
 
-// Persistent "Pages analysed" bar under the header — own domain first, and a
-// red chip flags a competitor that returned 0 pages (usually a wrong domain).
+// Persistent "Pages analysed" bar under the header — own domain first, a red
+// chip flags a competitor that returned 0 pages (usually a wrong domain), plus
+// a button to open the full list of scraped pages.
 function renderPagesAnalysed(domainPages) {
   const el = document.getElementById('pagesAnalysed');
   if (!el) return;
   if (!domainPages || !domainPages.length) { el.hidden = true; el.innerHTML = ''; return; }
+  let total = 0;
   const chips = domainPages.map(d => {
+    total += d.pages || 0;
     const cls = d.is_own ? 'own' : (d.pages === 0 ? 'zero' : '');
     const role = d.is_own ? 'you' : 'competitor';
     return `<span class="dchip ${cls}">${esc(d.domain)} <b>${d.pages}</b> pages`
       + `<span style="opacity:.6"> · ${role}</span></span>`;
   }).join('');
-  el.innerHTML = `<span class="pa-label">Pages analysed:</span>${chips}`;
+  el.innerHTML = `<span class="pa-label">Pages analysed:</span>${chips}`
+    + `<button id="viewPagesBtn" class="view-pages" ${total ? '' : 'disabled'}>`
+    + `View all ${total} pages →</button>`;
   el.hidden = false;
+  const btn = document.getElementById('viewPagesBtn');
+  if (btn) btn.addEventListener('click', openPagesModal);
+}
+
+// --- "all scraped pages" modal ---------------------------------------------
+async function openPagesModal() {
+  const base = apiBase();
+  const modal = document.getElementById('pagesModal');
+  const body = document.getElementById('pagesModalBody');
+  if (!modal || !body || !base || currentRunId == null) return;
+  body.innerHTML = '<div class="muted">Loading pages…</div>';
+  modal.hidden = false;
+  try {
+    const data = await (await fetch(`${base}/runs/${currentRunId}/pages`)).json();
+    body.innerHTML = (data.domains || []).map(d => {
+      const items = (d.pages || []).map(pg =>
+        `<li><a href="${esc(pg.url)}" target="_blank" rel="noopener" title="${esc(pg.url)}">`
+        + `<span class="pg-title">${esc(pg.title || pg.url)}</span>`
+        + `<span class="pg-url">${esc(prettyUrl(pg.url))}</span></a></li>`
+      ).join('') || '<li class="muted">No pages scraped for this domain.</li>';
+      return `<section class="pg-group">`
+        + `<h4>${esc(d.domain)} <span class="pg-count">${(d.pages || []).length} pages`
+        + `${d.is_own ? ' · you' : ' · competitor'}</span></h4>`
+        + `<ul class="pg-list">${items}</ul></section>`;
+    }).join('') || '<div class="muted">No pages.</div>';
+  } catch (e) {
+    body.innerHTML = `<div class="muted">Could not load pages. ${esc(e.message)}</div>`;
+  }
+}
+
+function closePagesModal() {
+  const modal = document.getElementById('pagesModal');
+  if (modal) modal.hidden = true;
 }
 
 function indexTopics(map) {
@@ -282,6 +356,17 @@ document.getElementById('analyzeForm').addEventListener('submit', (e) => {
   // Blank -> 0 means "all pages" (bounded server-side by the crawl time budget).
   const maxPages = parseInt(document.getElementById('maxPages').value, 10) || 0;
   startAnalysis(own, comps, maxPages);
+});
+
+// Close the "scraped pages" modal on backdrop click, the ✕, or Escape.
+const pagesModalEl = document.getElementById('pagesModal');
+if (pagesModalEl) {
+  pagesModalEl.addEventListener('click', (e) => {
+    if (e.target.hasAttribute('data-close')) closePagesModal();
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closePagesModal();
 });
 
 // Deep-link: ?run=N loads (or resumes polling for) that run. Otherwise wait

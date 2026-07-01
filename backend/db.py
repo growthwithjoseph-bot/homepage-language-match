@@ -30,10 +30,11 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 CREATE TABLE IF NOT EXISTS domains (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id    INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    domain    TEXT    NOT NULL,
-    is_own    INTEGER NOT NULL DEFAULT 0
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    domain     TEXT    NOT NULL,
+    is_own     INTEGER NOT NULL DEFAULT 0,
+    discovered INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS pages (
@@ -130,10 +131,20 @@ def init_db(db_path: Optional[Path] = None) -> Path:
     conn = get_connection(path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
     return path
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive migrations for databases created before a column existed.
+    `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
+    are added here (idempotently)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(domains)")}
+    if "discovered" not in cols:
+        conn.execute("ALTER TABLE domains ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")
 
 
 def list_tables(conn: sqlite3.Connection) -> Iterable[str]:
@@ -196,7 +207,7 @@ def run_counts(conn: sqlite3.Connection, run_id: int) -> dict:
 def domain_page_counts(conn: sqlite3.Connection, run_id: int) -> list:
     """Per-domain pages-stored-so-far, own domain first (for live progress)."""
     rows = conn.execute(
-        """SELECT d.domain, d.is_own, COUNT(p.id) AS pages
+        """SELECT d.domain, d.is_own, d.discovered, COUNT(p.id) AS pages
            FROM domains d LEFT JOIN pages p ON p.domain_id = d.id
            WHERE d.run_id = ?
            GROUP BY d.id
@@ -204,9 +215,39 @@ def domain_page_counts(conn: sqlite3.Connection, run_id: int) -> list:
         (run_id,),
     ).fetchall()
     return [
-        {"domain": r["domain"], "is_own": bool(r["is_own"]), "pages": r["pages"]}
+        {
+            "domain": r["domain"],
+            "is_own": bool(r["is_own"]),
+            "pages": r["pages"],
+            "discovered": r["discovered"],  # URLs found to scan (progress denominator)
+        }
         for r in rows
     ]
+
+
+def list_pages(run_id: int, db_path: Optional[Path] = None) -> list:
+    """All scraped pages for a run, grouped by domain (own first)."""
+    conn = get_connection(db_path)
+    try:
+        doms = conn.execute(
+            "SELECT id, domain, is_own FROM domains WHERE run_id=? "
+            "ORDER BY is_own DESC, id",
+            (run_id,),
+        ).fetchall()
+        out = []
+        for d in doms:
+            pages = conn.execute(
+                "SELECT url, title FROM pages WHERE domain_id=? ORDER BY id",
+                (d["id"],),
+            ).fetchall()
+            out.append({
+                "domain": d["domain"],
+                "is_own": bool(d["is_own"]),
+                "pages": [{"url": p["url"], "title": p["title"]} for p in pages],
+            })
+        return out
+    finally:
+        conn.close()
 
 
 def build_map(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:

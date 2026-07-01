@@ -114,6 +114,12 @@ def crawl_domain(
     budget = cfg.crawl_time_budget_seconds or None
 
     conn = get_connection(cfg.db_path)
+    # Record how many URLs we'll try, so the UI can show scan progress
+    # (pages stored / pages discovered) live as fetches complete.
+    conn.execute(
+        "UPDATE domains SET discovered=? WHERE id=?", (len(urls), domain_id)
+    )
+    conn.commit()
     stored = {"n": 0}
 
     def handle(res):
