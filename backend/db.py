@@ -227,6 +227,7 @@ def build_map(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
                ORDER BY cat.id, t.id""",
             (run_id,),
         ).fetchall()
+        domain_pages = domain_page_counts(conn, run_id)
     finally:
         conn.close()
 
@@ -255,6 +256,7 @@ def build_map(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
         "status": run["status"],
         "own_domain": run["own_domain"],
         "competitors": _json.loads(run["competitor_domains_json"] or "[]"),
+        "domain_pages": domain_pages,  # [{domain, is_own, pages}] — pages analysed
         "categories": [cats[c] for c in order],
     }
 

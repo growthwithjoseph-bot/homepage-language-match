@@ -137,6 +137,7 @@ async function loadMap(runId) {
     currentRunId = runId;
     indexTopics(map);
     renderRadialMap(mapEl, map, onTopicClick);
+    renderPagesAnalysed(map.domain_pages);
     const n = Object.keys(topicsById).length;
     statusEl.textContent = `${map.own_domain} vs ${(map.competitors || []).join(', ')} · ${n} topics`
       + (usingSample ? ' · sample data' : '');
@@ -147,12 +148,29 @@ async function loadMap(runId) {
       usingSample = true;
       indexTopics(map);
       renderRadialMap(mapEl, map, onTopicClick);
+      renderPagesAnalysed(null);
       statusEl.textContent = 'API unavailable — showing sample data';
     } catch (e2) {
       mapEl.innerHTML = `<div class="muted">Could not load a map.<br>${err.message}</div>`;
       statusEl.textContent = '';
     }
   }
+}
+
+// Persistent "Pages analysed" bar under the header — own domain first, and a
+// red chip flags a competitor that returned 0 pages (usually a wrong domain).
+function renderPagesAnalysed(domainPages) {
+  const el = document.getElementById('pagesAnalysed');
+  if (!el) return;
+  if (!domainPages || !domainPages.length) { el.hidden = true; el.innerHTML = ''; return; }
+  const chips = domainPages.map(d => {
+    const cls = d.is_own ? 'own' : (d.pages === 0 ? 'zero' : '');
+    const role = d.is_own ? 'you' : 'competitor';
+    return `<span class="dchip ${cls}">${esc(d.domain)} <b>${d.pages}</b> pages`
+      + `<span style="opacity:.6"> · ${role}</span></span>`;
+  }).join('');
+  el.innerHTML = `<span class="pa-label">Pages analysed:</span>${chips}`;
+  el.hidden = false;
 }
 
 function indexTopics(map) {
