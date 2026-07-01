@@ -100,6 +100,15 @@ class Config:
     request_timeout: float = field(
         default_factory=lambda: _env_float("TC_REQUEST_TIMEOUT", 20.0)
     )
+    # Rate-limit handling: retry 429/503 with backoff instead of dropping the
+    # page. Honours Retry-After (capped). Without this a throttling host (e.g.
+    # Shopify/Cloudflare returning 429) silently yields zero pages.
+    fetch_max_retries: int = field(
+        default_factory=lambda: _env_int("TC_FETCH_MAX_RETRIES", 3)
+    )
+    rate_limit_max_wait: float = field(
+        default_factory=lambda: _env_float("TC_RATE_LIMIT_MAX_WAIT", 15.0)
+    )
     user_agent: str = field(
         default_factory=lambda: _env_str(
             "TC_USER_AGENT",

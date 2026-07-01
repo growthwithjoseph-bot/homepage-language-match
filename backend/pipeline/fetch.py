@@ -31,6 +31,7 @@ class FetchResult:
     html: Optional[str]
     etag: Optional[str]
     rendered: bool = False  # True if fetched via Playwright
+    retry_after: Optional[float] = None  # server's Retry-After on a 429/503, if any
 
 
 class RobotsCache:
@@ -85,6 +86,22 @@ async def _maybe_render(url: str) -> Optional[str]:
         return None
 
 
+# Transient statuses worth retrying after a backoff (rate-limit / unavailable).
+RETRY_STATUSES = {429, 503}
+
+
+def _parse_retry_after(resp: httpx.Response) -> Optional[float]:
+    """The server's Retry-After in seconds (seconds form only; HTTP-date is
+    ignored in favour of our own backoff)."""
+    ra = resp.headers.get("retry-after")
+    if not ra:
+        return None
+    try:
+        return max(0.0, float(ra))
+    except ValueError:
+        return None
+
+
 async def fetch_url(
     client: httpx.AsyncClient,
     url: str,
@@ -100,7 +117,10 @@ async def fetch_url(
 
     etag = resp.headers.get("etag")
     if resp.status_code >= 400:
-        return FetchResult(url=url, status=resp.status_code, html=None, etag=etag)
+        return FetchResult(
+            url=url, status=resp.status_code, html=None, etag=etag,
+            retry_after=_parse_retry_after(resp),
+        )
 
     html = resp.text
     if allow_render and (html is None or len(html) < THIN_BODY_CHARS):
@@ -131,6 +151,11 @@ async def fetch_many(
     results: List[FetchResult] = []
     loop = asyncio.get_event_loop()
     start = loop.time()
+    # Host-wide cooldown: when any worker is rate-limited (429/503) it pushes
+    # this timestamp forward, and every worker waits past it before its next
+    # request. This throttles the whole crawl instead of letting concurrent
+    # workers retry-storm a limiter (which just re-triggers the 429s).
+    cooldown_until = 0.0
 
     def expired() -> bool:
         return bool(deadline_seconds) and (loop.time() - start) > deadline_seconds
@@ -144,10 +169,21 @@ async def fetch_many(
     ) as client:
 
         async def worker(u: str) -> FetchResult:
+            nonlocal cooldown_until
             async with sem:
-                if expired():  # budget spent -> skip remaining URLs
-                    return FetchResult(url=u, status=997, html=None, etag=None)
-                res = await fetch_url(client, u, robots, allow_render)
+                res = FetchResult(url=u, status=997, html=None, etag=None)
+                for attempt in range(cfg.fetch_max_retries + 1):
+                    if expired():  # budget spent -> skip remaining URLs
+                        return FetchResult(url=u, status=997, html=None, etag=None)
+                    wait = cooldown_until - loop.time()  # respect host cooldown
+                    if wait > 0:
+                        await asyncio.sleep(min(wait, cfg.rate_limit_max_wait))
+                    res = await fetch_url(client, u, robots, allow_render)
+                    if res.status in RETRY_STATUSES and attempt < cfg.fetch_max_retries:
+                        back = res.retry_after if res.retry_after is not None else 2.0 ** attempt
+                        cooldown_until = loop.time() + min(back, cfg.rate_limit_max_wait)
+                        continue
+                    break
                 await asyncio.sleep(0.2)  # gentle inter-request delay per slot
                 return res
 

@@ -1,11 +1,16 @@
 """M1 unit checks that don't need the network: URL filtering, extraction,
 and page storage. A live end-to-end crawl is exercised via `make crawl`."""
+import asyncio
 from pathlib import Path
+
+import httpx
 
 from backend.config import Config
 from backend.db import get_connection, init_db
+from backend.pipeline import fetch as fetch_mod
 from backend.pipeline.discover import is_content_url, normalize_base, registrable_host
 from backend.pipeline.extract import extract_page
+from backend.pipeline.fetch import FetchResult, _parse_retry_after, fetch_many
 from backend.pipeline.run import create_run, get_domains, _store_pages
 
 
@@ -52,6 +57,47 @@ def test_extract_page_from_html():
     assert page is not None
     assert page.text and "Gantt" in page.text
     assert page.lang == "en"
+
+
+def test_parse_retry_after():
+    def resp(val):
+        return httpx.Response(429, headers={} if val is None else {"retry-after": val})
+    assert _parse_retry_after(resp("5")) == 5.0
+    assert _parse_retry_after(resp(None)) is None
+    assert _parse_retry_after(resp("Wed, 21 Oct 2099 07:28:00 GMT")) is None  # HTTP-date -> backoff
+
+
+def test_fetch_retries_then_succeeds_on_429(monkeypatch):
+    """A host that returns 429 then recovers should yield the page, not drop it."""
+    cfg = Config(fetch_max_retries=3, rate_limit_max_wait=0.01, per_host_concurrency=2)
+    calls = {}
+
+    async def fake_fetch_url(client, url, robots, allow_render=True):
+        n = calls.get(url, 0)
+        calls[url] = n + 1
+        if n < 2:  # throttled on the first two attempts, then recovers
+            return FetchResult(url=url, status=429, html=None, etag=None, retry_after=0.0)
+        return FetchResult(url=url, status=200, html="<html>ok</html>", etag=None)
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", fake_fetch_url)
+    results = asyncio.run(fetch_many(["https://x.com/a"], cfg=cfg))
+    assert calls["https://x.com/a"] == 3          # retried past the two 429s
+    assert results[0].status == 200 and results[0].html
+
+
+def test_fetch_gives_up_after_max_retries(monkeypatch):
+    """Persistent 429 is dropped after the retry budget (no infinite loop)."""
+    cfg = Config(fetch_max_retries=2, rate_limit_max_wait=0.01, per_host_concurrency=1)
+    calls = {"n": 0}
+
+    async def always_429(client, url, robots, allow_render=True):
+        calls["n"] += 1
+        return FetchResult(url=url, status=429, html=None, etag=None, retry_after=0.0)
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", always_429)
+    results = asyncio.run(fetch_many(["https://x.com/a"], cfg=cfg))
+    assert calls["n"] == 3                         # initial try + 2 retries
+    assert results[0].status == 429 and results[0].html is None
 
 
 def test_store_pages_roundtrip(tmp_path: Path):
