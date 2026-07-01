@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 try:  # .env is optional; defaults stand on their own.
     from dotenv import load_dotenv
@@ -94,8 +94,16 @@ class Config:
     max_pages_per_domain: int = field(
         default_factory=lambda: _env_int("TC_MAX_PAGES_PER_DOMAIN", 300)
     )
+    # Politeness / rate-limit avoidance. Lower concurrency + a per-request delay
+    # keep us under a host's rate limiter (e.g. Shopify/Cloudflare 429). With
+    # concurrency 2 and a 0.5s delay we sustain ~4 req/s — enough to crawl a
+    # large site fully without tripping most limiters. Raise for speed on
+    # tolerant hosts; the crawl backs off automatically on 429 either way.
     per_host_concurrency: int = field(
-        default_factory=lambda: _env_int("TC_PER_HOST_CONCURRENCY", 4)
+        default_factory=lambda: _env_int("TC_PER_HOST_CONCURRENCY", 2)
+    )
+    per_request_delay_seconds: float = field(
+        default_factory=lambda: _env_float("TC_PER_REQUEST_DELAY", 0.5)
     )
     request_timeout: float = field(
         default_factory=lambda: _env_float("TC_REQUEST_TIMEOUT", 20.0)
@@ -124,10 +132,17 @@ class Config:
             "TC_EXCLUDE_URL_PATTERNS", DEFAULT_EXCLUDE_PATTERNS
         )
     )
-    # Per-domain wall-clock budget for crawling. Once exceeded, remaining URLs
-    # are skipped so one slow/huge site can't stall a run. 0 = no time limit.
-    crawl_time_budget_seconds: float = field(
-        default_factory=lambda: _env_float("TC_CRAWL_TIME_BUDGET", 180.0)
+    # Per-domain crawl time budget. This is a STALL-GUARD, not a coverage cap:
+    # it scales with the number of URLs discovered (seconds_per_url * n_urls) so
+    # a large site can be fully crawled, and is only bounded by an absolute
+    # ceiling to stop a genuinely stuck/hostile host from running forever.
+    # Coverage is capped by max_pages_per_domain (page count), not by time.
+    # Set seconds_per_url = 0 for no time limit at all.
+    crawl_seconds_per_url: float = field(
+        default_factory=lambda: _env_float("TC_CRAWL_SECONDS_PER_URL", 2.0)
+    )
+    crawl_time_budget_max_seconds: float = field(
+        default_factory=lambda: _env_float("TC_CRAWL_TIME_BUDGET_MAX", 1800.0)
     )
     # Hard cap on the sitemap-less focused-crawl fallback (live crawling is
     # slow). Sites WITH a sitemap aren't affected by this.
@@ -221,6 +236,17 @@ class Config:
     def ensure_dirs(self) -> None:
         """Create any directories the config implies (e.g. the DB folder)."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def crawl_deadline_for(self, n_urls: int) -> Optional[float]:
+        """Wall-clock stall-guard for crawling `n_urls` pages of one domain.
+        Scales with the work (so a big site isn't truncated) but is capped by an
+        absolute ceiling. Returns None for 'no limit'."""
+        if self.crawl_seconds_per_url <= 0:
+            return None  # unlimited
+        deadline = self.crawl_seconds_per_url * max(1, n_urls)
+        if self.crawl_time_budget_max_seconds > 0:
+            deadline = min(deadline, self.crawl_time_budget_max_seconds)
+        return deadline
 
 
 # The 5 coverage states and their colours (SPEC §2). Kept here so both the API

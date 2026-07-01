@@ -111,7 +111,9 @@ def crawl_domain(
     counts update live during the crawl. Crawling stops at the time budget.
     """
     urls = discover_urls(domain, max_pages=max_pages, cfg=cfg)
-    budget = cfg.crawl_time_budget_seconds or None
+    # Time budget scales with the number of URLs (stall-guard, not a coverage
+    # cap) so a large site is crawled in full — see Config.crawl_deadline_for.
+    budget = cfg.crawl_deadline_for(len(urls))
 
     conn = get_connection(cfg.db_path)
     # Record how many URLs we'll try, so the UI can show scan progress

@@ -59,6 +59,15 @@ def test_extract_page_from_html():
     assert page.lang == "en"
 
 
+def test_crawl_deadline_scales_with_urls():
+    cfg = Config(crawl_seconds_per_url=2.0, crawl_time_budget_max_seconds=1800.0)
+    assert cfg.crawl_deadline_for(10) == 20.0          # small site -> short
+    assert cfg.crawl_deadline_for(715) == 1430.0       # large site -> not truncated
+    assert cfg.crawl_deadline_for(5000) == 1800.0      # capped by the ceiling
+    # seconds_per_url = 0 means no time limit at all
+    assert Config(crawl_seconds_per_url=0).crawl_deadline_for(1000) is None
+
+
 def test_parse_retry_after():
     def resp(val):
         return httpx.Response(429, headers={} if val is None else {"retry-after": val})

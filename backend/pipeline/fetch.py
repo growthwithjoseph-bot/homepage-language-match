@@ -184,7 +184,8 @@ async def fetch_many(
                         cooldown_until = loop.time() + min(back, cfg.rate_limit_max_wait)
                         continue
                     break
-                await asyncio.sleep(0.2)  # gentle inter-request delay per slot
+                if cfg.per_request_delay_seconds > 0:  # polite pacing per slot
+                    await asyncio.sleep(cfg.per_request_delay_seconds)
                 return res
 
         tasks = [asyncio.create_task(worker(u)) for u in urls]
