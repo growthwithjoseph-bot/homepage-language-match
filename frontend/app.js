@@ -1,157 +1,96 @@
-// Topic Coverage frontend controller.
-// Loads a /runs/{id}/map payload (or the bundled sample for offline dev),
-// renders the radial map, and on topic click loads /runs/{id}/topics/{tid}
-// into the detail panel.
+// Homepage Language Match — controller.
+// Enter your domain + competitors → POST /runs → poll → GET /runs/{id}/report,
+// then render per-competitor score cards + a semantic-vs-lexical scatter.
 
-const STATE_LABEL = {
-  only_you: 'Only you', you_lead: 'You lead', even: 'Even',
-  comp_lead: 'Competitor leads', only_comp: 'Only competitor',
-};
-// STATE_COLOR is defined globally by radial-map.js (loaded first).
-
-const mapEl = document.getElementById('map');
-const detailEl = document.getElementById('detail');
 const statusEl = document.getElementById('status');
 const progressEl = document.getElementById('progress');
+const reportEl = document.getElementById('report');
 const analyzeBtn = document.getElementById('analyzeBtn');
 
 let currentRunId = null;
-let usingSample = false;       // sample mode: no /topics endpoint
-let topicsById = {};           // cache nodes from the map for sample-mode detail
 let pollTimer = null;
+let lastReport = null;
+let scatterSection = 'headline';   // 'headline' | 'paragraph'
 
 function apiBase() {
-  // When served by FastAPI we share its origin; over file:// there's no API.
   return location.protocol === 'file:' ? null : location.origin;
 }
 
-// A cheerful "dog chasing a ball" scene shown in the map area while crawling —
-// pure CSS/SVG (see index.html for the keyframes), so it costs nothing to run.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+}
+function prettyDomain(url) {
+  return String(url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+}
+
+// --- "analysing" animation (dog chasing a ball through changing scenery) -----
 const CRAWL_ANIM_HTML = `
   <div class="crawl-anim" id="crawlScene">
     <svg class="crawl-scene" viewBox="0 0 280 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs><clipPath id="csClip"><rect x="0" y="0" width="280" height="130" rx="12"/></clipPath></defs>
       <g clip-path="url(#csClip)">
-        <!-- 1. Park -->
-        <g class="bgscene bg1">
-          <rect width="280" height="130" fill="#d7eefe"/>
-          <circle cx="242" cy="26" r="12" fill="#fde68a"/>
-          <rect y="104" width="280" height="26" fill="#8fe0a0"/>
-          <rect x="46" y="84" width="6" height="28" fill="#7c5c3b"/>
-          <rect x="98" y="90" width="6" height="22" fill="#7c5c3b"/>
-          <circle cx="49" cy="78" r="18" fill="#3fae60"/>
-          <circle cx="101" cy="84" r="13" fill="#3fae60"/>
-        </g>
-        <!-- 2. Mountains -->
-        <g class="bgscene bg2">
-          <rect width="280" height="130" fill="#dbeafe"/>
-          <polygon points="6,114 66,48 128,114" fill="#9aa7bd"/>
-          <polygon points="52,66 66,48 80,66" fill="#ffffff"/>
-          <polygon points="120,114 184,38 250,114" fill="#8593ab"/>
-          <polygon points="169,58 184,38 199,58" fill="#ffffff"/>
-          <rect y="110" width="280" height="20" fill="#a7d9b4"/>
-        </g>
-        <!-- 3. City -->
-        <g class="bgscene bg3">
-          <rect width="280" height="130" fill="#e2e8ff"/>
-          <rect x="22" y="66" width="30" height="54" fill="#64748b"/>
-          <rect x="58" y="50" width="26" height="70" fill="#475569"/>
-          <rect x="90" y="76" width="24" height="44" fill="#7c8aa0"/>
-          <rect x="168" y="56" width="28" height="64" fill="#52607a"/>
-          <rect x="202" y="72" width="30" height="48" fill="#647089"/>
-          <rect x="236" y="46" width="22" height="74" fill="#465063"/>
-          <g fill="#fbbf24"><rect x="64" y="58" width="4" height="5"/><rect x="72" y="58" width="4" height="5"/><rect x="64" y="70" width="4" height="5"/><rect x="174" y="64" width="4" height="5"/><rect x="242" y="56" width="4" height="5"/></g>
-          <rect y="118" width="280" height="12" fill="#c3ccd9"/>
-        </g>
-        <!-- 4. Garden of a house -->
-        <g class="bgscene bg4">
-          <rect width="280" height="130" fill="#d7eefe"/>
-          <rect y="104" width="280" height="26" fill="#8fe0a0"/>
-          <polygon points="146,74 182,44 218,74" fill="#c1553f"/>
-          <rect x="152" y="74" width="60" height="46" fill="#f4c58a"/>
-          <rect x="176" y="96" width="14" height="24" fill="#7c5c3b"/>
+        <g class="bgscene bg1"><rect width="280" height="130" fill="#d7eefe"/>
+          <circle cx="242" cy="26" r="12" fill="#fde68a"/><rect y="104" width="280" height="26" fill="#8fe0a0"/>
+          <rect x="46" y="84" width="6" height="28" fill="#7c5c3b"/><rect x="98" y="90" width="6" height="22" fill="#7c5c3b"/>
+          <circle cx="49" cy="78" r="18" fill="#3fae60"/><circle cx="101" cy="84" r="13" fill="#3fae60"/></g>
+        <g class="bgscene bg2"><rect width="280" height="130" fill="#dbeafe"/>
+          <polygon points="6,114 66,48 128,114" fill="#9aa7bd"/><polygon points="52,66 66,48 80,66" fill="#fff"/>
+          <polygon points="120,114 184,38 250,114" fill="#8593ab"/><polygon points="169,58 184,38 199,58" fill="#fff"/>
+          <rect y="110" width="280" height="20" fill="#a7d9b4"/></g>
+        <g class="bgscene bg3"><rect width="280" height="130" fill="#e2e8ff"/>
+          <rect x="22" y="66" width="30" height="54" fill="#64748b"/><rect x="58" y="50" width="26" height="70" fill="#475569"/>
+          <rect x="90" y="76" width="24" height="44" fill="#7c8aa0"/><rect x="168" y="56" width="28" height="64" fill="#52607a"/>
+          <rect x="202" y="72" width="30" height="48" fill="#647089"/><rect x="236" y="46" width="22" height="74" fill="#465063"/>
+          <rect y="118" width="280" height="12" fill="#c3ccd9"/></g>
+        <g class="bgscene bg4"><rect width="280" height="130" fill="#d7eefe"/>
+          <rect y="104" width="280" height="26" fill="#8fe0a0"/><polygon points="146,74 182,44 218,74" fill="#c1553f"/>
+          <rect x="152" y="74" width="60" height="46" fill="#f4c58a"/><rect x="176" y="96" width="14" height="24" fill="#7c5c3b"/>
           <rect x="194" y="84" width="12" height="12" fill="#bfe3f5"/>
-          <g fill="#f472b6"><circle cx="30" cy="112" r="3"/><circle cx="60" cy="116" r="3"/><circle cx="92" cy="112" r="3"/></g>
-          <g fill="#fbbf24"><circle cx="30" cy="112" r="1.2"/><circle cx="60" cy="116" r="1.2"/><circle cx="92" cy="112" r="1.2"/></g>
-        </g>
-        <!-- 5. Beach -->
-        <g class="bgscene bg5">
-          <rect width="280" height="130" fill="#cfeafd"/>
-          <circle cx="44" cy="28" r="13" fill="#fde68a"/>
-          <rect y="94" width="280" height="22" fill="#38bdf8"/>
-          <rect y="114" width="280" height="16" fill="#f6df9c"/>
-          <rect x="232" y="80" width="5" height="36" fill="#8a6a44"/>
-          <g fill="#3fae60"><ellipse cx="226" cy="80" rx="12" ry="5"/><ellipse cx="244" cy="80" rx="12" ry="5"/><ellipse cx="234" cy="74" rx="6" ry="11"/></g>
-        </g>
-        <!-- ball -->
+          <g fill="#f472b6"><circle cx="30" cy="112" r="3"/><circle cx="60" cy="116" r="3"/><circle cx="92" cy="112" r="3"/></g></g>
+        <g class="bgscene bg5"><rect width="280" height="130" fill="#cfeafd"/>
+          <circle cx="44" cy="28" r="13" fill="#fde68a"/><rect y="94" width="280" height="22" fill="#38bdf8"/>
+          <rect y="114" width="280" height="16" fill="#f6df9c"/><rect x="232" y="80" width="5" height="36" fill="#8a6a44"/>
+          <g fill="#3fae60"><ellipse cx="226" cy="80" rx="12" ry="5"/><ellipse cx="244" cy="80" rx="12" ry="5"/><ellipse cx="234" cy="74" rx="6" ry="11"/></g></g>
         <g transform="translate(0,44)"><g class="cs-ball"><g class="cs-ball-bounce">
-          <circle cx="70" cy="68" r="8" fill="#f59e0b"/>
-          <circle cx="67" cy="65" r="2.5" fill="#fff" opacity=".8"/>
+          <circle cx="70" cy="68" r="8" fill="#f59e0b"/><circle cx="67" cy="65" r="2.5" fill="#fff" opacity=".8"/>
         </g></g></g>
-        <!-- dog -->
         <g transform="translate(0,44)"><g class="cs-dog"><g class="cs-dog-bob" fill="#8b5e3c">
           <path class="cs-tail" d="M6 56 C -4 52 -4 44 2 44 C 4 48 8 52 10 54 Z"/>
           <rect class="cs-leg cs-leg-a" x="12" y="62" width="4.5" height="14" rx="2.2"/>
           <rect class="cs-leg cs-leg-b" x="22" y="62" width="4.5" height="14" rx="2.2"/>
           <rect class="cs-leg cs-leg-a" x="33" y="62" width="4.5" height="14" rx="2.2"/>
           <rect class="cs-leg cs-leg-b" x="41" y="62" width="4.5" height="14" rx="2.2"/>
-          <ellipse cx="27" cy="57" rx="21" ry="11"/>
-          <circle cx="47" cy="48" r="9"/>
-          <path d="M40 41 C 36 34 44 33 45 40 Z"/>
-          <rect x="53" y="48" width="9" height="7" rx="3.5"/>
-          <circle cx="61" cy="49" r="2" fill="#3b2a1a"/>
-          <circle cx="49" cy="46" r="1.6" fill="#3b2a1a"/>
+          <ellipse cx="27" cy="57" rx="21" ry="11"/><circle cx="47" cy="48" r="9"/>
+          <path d="M40 41 C 36 34 44 33 45 40 Z"/><rect x="53" y="48" width="9" height="7" rx="3.5"/>
+          <circle cx="61" cy="49" r="2" fill="#3b2a1a"/><circle cx="49" cy="46" r="1.6" fill="#3b2a1a"/>
         </g></g></g>
       </g>
     </svg>
     <div class="crawl-caption">
-      <span>Fetching every page we can find…</span>
-      <span>Sniffing out links the sitemap forgot…</span>
-      <span>Good boy is on the case — sit tight…</span>
+      <span>Reading the homepages…</span>
+      <span>Comparing headlines and paragraphs…</span>
+      <span>Scoring the language match…</span>
     </div>
   </div>`;
 
-// Idempotent: don't re-inject (that would restart the animation) if it's up.
-function showCrawlAnim() {
-  if (!mapEl || document.getElementById('crawlScene')) return;
-  mapEl.innerHTML = CRAWL_ANIM_HTML;
+function showAnim() {
+  progressEl.hidden = false;
+  if (!document.getElementById('crawlScene')) progressEl.innerHTML = CRAWL_ANIM_HTML;
 }
 
-// --- starting a new analysis (crawl + categorise) ---------------------------
-
-// Pipeline stages, in order, mapped to the backend's run status values.
-const STAGES = [
-  { status: 'running',  label: 'Crawling pages' },
-  { status: 'crawled',  label: 'Embedding content' },
-  { status: 'embedded', label: 'Discovering topics' },
-  { status: 'topiced',  label: 'Scoring coverage' },
-  { status: 'done',     label: 'Done' },
-];
-
-function stageIndex(status) {
-  const i = STAGES.findIndex(s => s.status === status);
-  return i < 0 ? 0 : i;
-}
-
-async function startAnalysis(ownDomain, competitors, maxPages) {
+// --- run lifecycle ----------------------------------------------------------
+async function startAnalysis(own, comps) {
   const base = apiBase();
-  if (!base) {
-    statusEl.textContent = 'Open this page via the running server (make dev), not as a file.';
-    return;
-  }
+  if (!base) { statusEl.textContent = 'Open this page via the running server (make dev).'; return; }
   analyzeBtn.disabled = true;
-  detailEl.innerHTML = '<div class="empty">Analyzing… the map appears when the run finishes.</div>';
-  showCrawlAnim();
+  reportEl.hidden = true;
   statusEl.textContent = '';
+  showAnim();
   try {
     const res = await fetch(`${base}/runs`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        own_domain: ownDomain,
-        competitor_domains: competitors,
-        max_pages_per_domain: maxPages,
-      }),
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ own_domain: own, competitor_domains: comps }),
     });
     if (!res.ok) throw new Error(`start failed (${res.status})`);
     const { run_id } = await res.json();
@@ -160,390 +99,176 @@ async function startAnalysis(ownDomain, competitors, maxPages) {
     pollRun(run_id);
   } catch (err) {
     analyzeBtn.disabled = false;
+    progressEl.hidden = true;
     statusEl.textContent = err.message;
-    mapEl.innerHTML = `<div class="muted">Could not start the run.<br>${esc(err.message)}</div>`;
   }
-}
-
-function renderProgress(status, counts, domains, errored) {
-  const idx = stageIndex(status);
-  progressEl.hidden = false;
-  progressEl.classList.toggle('error', !!errored);
-  const steps = STAGES.slice(0, -1).map((s, i) => {
-    const cls = errored ? '' : i < idx ? 'done' : i === idx ? 'active' : '';
-    return `<span class="${cls}">${s.label}</span>`;
-  }).join('');
-  const c = counts || {};
-  const crawling = status === 'running';           // stage 0 = crawling pages
-  const doms = domains || [];
-  const detected = doms.reduce((s, d) => s + (d.discovered || 0), 0);
-  const scanned = doms.reduce((s, d) => s + (d.pages || 0), 0);
-
-  // Top bar: during the crawl it creeps across the first stage-segment in step
-  // with pages scanned; afterwards it snaps to the stage-based position.
-  const seg = 100 / (STAGES.length - 1);
-  let pct;
-  if (errored) pct = 100;
-  else if (crawling && detected > 0) pct = Math.round((scanned / detected) * seg);
-  else pct = Math.round((idx / (STAGES.length - 1)) * 100);
-
-  const rows = doms.map(d => domainScanRow(d, crawling)).join('');
-  const summary = errored ? '⚠ run failed — check the server logs'
-    : crawling ? `${scanned} of ${detected || '…'} detected pages scanned · ${c.chunks || 0} chunks`
-    : `${c.pages || 0} pages · ${c.chunks || 0} chunks · ${c.topics || 0} topics`;
-
-  progressEl.innerHTML = `
-    <div class="bar"><span style="width:${pct}%"></span></div>
-    <div class="steps">${steps}</div>
-    <div class="counts">${summary}</div>
-    <div class="dscan">${rows}</div>`;
-}
-
-// One per-domain scan bar: pages stored / pages discovered. While a domain is
-// still being discovered the denominator is unknown, so we show an
-// indeterminate bar; once the crawl stage passes, the scan is complete.
-function domainScanRow(d, crawling) {
-  const scanned = d.pages || 0;
-  const detected = d.discovered || 0;
-  const role = d.is_own ? 'you' : 'competitor';
-  const discovering = crawling && detected === 0 && scanned === 0;
-  const pctScan = detected > 0 ? Math.min(100, Math.round(scanned / detected * 100))
-    : (crawling ? 0 : 100);
-  const barCls = `dbar ${d.is_own ? 'own' : ''}` + (discovering ? ' indet' : '');
-  const count = discovering ? 'detecting pages…'
-    : detected > 0 ? `${scanned} / ${detected} scanned${crawling ? ` · ${pctScan}%` : ''}`
-    : `${scanned} pages`;
-  return `<div class="drow">
-    <div class="drow-top">
-      <span class="d-name">${esc(d.domain)} <span class="d-role">· ${role}</span></span>
-      <span class="d-count">${count}</span>
-    </div>
-    <div class="${barCls}"><span style="width:${pctScan}%"></span></div>
-  </div>`;
 }
 
 async function pollRun(runId) {
   const base = apiBase();
   if (pollTimer) clearTimeout(pollTimer);
   try {
-    const r = await fetch(`${base}/runs/${runId}`);
-    if (!r.ok) throw new Error(`run ${r.status}`);
-    const info = await r.json();
+    const info = await (await fetch(`${base}/runs/${runId}`)).json();
     if (info.status === 'error') {
-      renderProgress(info.status, info.counts, info.domains, true);
-      mapEl.innerHTML = '<div class="muted">Run failed — check the server logs.</div>';
       analyzeBtn.disabled = false;
+      progressEl.innerHTML = '<div class="muted" style="padding:40px;text-align:center">Analysis failed — check the server logs.</div>';
       return;
     }
-    renderProgress(info.status, info.counts, info.domains, false);
     if (info.status === 'done') {
       analyzeBtn.disabled = false;
-      await loadMap(runId);
-      setTimeout(() => { progressEl.hidden = true; }, 1500);
+      await loadReport(runId);
+      progressEl.hidden = true;
       return;
     }
-    showCrawlAnim();  // keep the dog running through all processing stages
+    showAnim();
   } catch (err) {
     statusEl.textContent = err.message;
   }
-  pollTimer = setTimeout(() => pollRun(runId), 2000);
+  pollTimer = setTimeout(() => pollRun(runId), 1500);
 }
 
-async function loadMap(runId) {
-  statusEl.textContent = 'Loading…';
-  topicsById = {};
+async function loadReport(runId) {
   const base = apiBase();
-  try {
-    let map;
-    if (base) {
-      const res = await fetch(`${base}/runs/${runId}/map`);
-      if (!res.ok) throw new Error(`map ${res.status}`);
-      map = await res.json();
-      usingSample = false;
-    } else {
-      map = await (await fetch('sample-map.json')).json();
-      usingSample = true;
-    }
-    currentRunId = runId;
-    indexTopics(map);
-    renderRadialMap(mapEl, map, onTopicClick);
-    renderPagesAnalysed(map.domain_pages);
-    const n = Object.keys(topicsById).length;
-    statusEl.textContent = `${map.own_domain} vs ${(map.competitors || []).join(', ')} · ${n} topics`
-      + (usingSample ? ' · sample data' : '');
-  } catch (err) {
-    // Fall back to the bundled sample if the API isn't reachable.
-    try {
-      const map = await (await fetch('sample-map.json')).json();
-      usingSample = true;
-      indexTopics(map);
-      renderRadialMap(mapEl, map, onTopicClick);
-      renderPagesAnalysed(null);
-      statusEl.textContent = 'API unavailable — showing sample data';
-    } catch (e2) {
-      mapEl.innerHTML = `<div class="muted">Could not load a map.<br>${err.message}</div>`;
-      statusEl.textContent = '';
-    }
-  }
+  const rep = await (await fetch(`${base}/runs/${runId}/report`)).json();
+  currentRunId = runId;
+  lastReport = rep;
+  renderReport(rep);
 }
 
-// Persistent "Pages analysed" bar under the header — own domain first, a red
-// chip flags a competitor that returned 0 pages (usually a wrong domain), plus
-// a button to open the full list of scraped pages.
-function renderPagesAnalysed(domainPages) {
-  const el = document.getElementById('pagesAnalysed');
-  if (!el) return;
-  if (!domainPages || !domainPages.length) { el.hidden = true; el.innerHTML = ''; return; }
-  let total = 0;
-  const chips = domainPages.map(d => {
-    total += d.pages || 0;
-    const cls = d.is_own ? 'own' : (d.pages === 0 ? 'zero' : '');
-    const role = d.is_own ? 'you' : 'competitor';
-    return `<span class="dchip ${cls}">${esc(d.domain)} <b>${d.pages}</b> pages`
-      + `<span style="opacity:.6"> · ${role}</span></span>`;
-  }).join('');
-  el.innerHTML = `<span class="pa-label">Pages analysed:</span>${chips}`
-    + `<button id="viewPagesBtn" class="view-pages" ${total ? '' : 'disabled'}>`
-    + `View all ${total} pages →</button>`;
-  el.hidden = false;
-  const btn = document.getElementById('viewPagesBtn');
-  if (btn) btn.addEventListener('click', openPagesModal);
+// --- rendering --------------------------------------------------------------
+function renderReport(rep) {
+  const own = rep.own || {};
+  const comps = rep.competitors || [];
+  reportEl.innerHTML =
+    `<div class="own-summary">
+       <div class="lbl">Your homepage</div>
+       <h2>${esc(own.title || prettyDomain(own.domain))}</h2>
+       <div class="meta">${esc(prettyDomain(own.domain))} · ${own.headline_count || 0} headlines · ${own.paragraph_count || 0} paragraphs</div>
+     </div>
+     <p class="legend-line">Each score is 0–100. <b class="sem">Meaning</b> = semantic similarity (same ideas, even in different words). <b class="lex">Wording</b> = lexical overlap (same actual words/phrases).</p>
+     ${comps.length >= 1 ? scatterPanel() : ''}
+     <div class="cmp-grid">${comps.map(card).join('') || '<p class="muted">No competitors.</p>'}</div>`;
+  reportEl.hidden = false;
+  if (comps.length) drawScatter();
+  statusEl.textContent = `${prettyDomain(own.domain)} vs ${comps.length} competitor${comps.length === 1 ? '' : 's'}`;
 }
 
-// --- "all scraped pages" modal — a collapsible sitemap tree -----------------
-async function openPagesModal() {
-  const base = apiBase();
-  const modal = document.getElementById('pagesModal');
-  const body = document.getElementById('pagesModalBody');
-  if (!modal || !body || !base || currentRunId == null) return;
-  body.innerHTML = '<div class="muted">Loading pages…</div>';
-  modal.hidden = false;
-  try {
-    const data = await (await fetch(`${base}/runs/${currentRunId}/pages`)).json();
-    const trees = (data.domains || []).map(renderDomainTree).join('')
-      || '<div class="muted">No pages.</div>';
-    body.innerHTML =
-      `<div class="tree-toolbar">`
-      + `<button type="button" data-tree="expand">Expand all</button>`
-      + `<button type="button" data-tree="collapse">Collapse all</button>`
-      + `</div><div class="tree">${trees}</div>`;
-  } catch (e) {
-    body.innerHTML = `<div class="muted">Could not load pages. ${esc(e.message)}</div>`;
-  }
-}
-
-// Group a flat [{url,title}] list into a tree keyed by URL path segments, so a
-// URL like /en-gb/blogs/the-root/x nests folder-by-folder. A node can hold both
-// its own page (a URL ending exactly there) and child folders.
-function buildUrlTree(pages) {
-  const root = { seg: '', children: new Map(), page: null };
-  for (const pg of pages) {
-    let pathname;
-    try { pathname = new URL(pg.url).pathname; } catch { pathname = pg.url || ''; }
-    let node = root;
-    for (const s of pathname.split('/').filter(Boolean)) {
-      if (!node.children.has(s)) node.children.set(s, { seg: s, children: new Map(), page: null });
-      node = node.children.get(s);
-    }
-    node.page = pg;  // terminal page for this exact path (homepage -> root)
-  }
-  return root;
-}
-
-function treeCount(node) {  // pages in this subtree, including the node's own
-  let n = node.page ? 1 : 0;
-  for (const c of node.children.values()) n += treeCount(c);
-  return n;
-}
-
-function sortedChildren(node) {
-  return [...node.children.values()].sort((a, b) => a.seg.localeCompare(b.seg));
-}
-
-function treeLeaf(pg, label) {
-  return `<a class="tleaf" href="${esc(pg.url)}" target="_blank" rel="noopener" title="${esc(pg.url)}">`
-    + `<span class="tname">${esc(label)}</span>`
-    + (pg.title ? `<span class="tleaf-title">${esc(pg.title)}</span>` : '')
-    + `</a>`;
-}
-
-function treeNode(node) {
-  const label = '/' + node.seg;
-  if (node.children.size === 0) return treeLeaf(node.page, label);  // pure page
-  // folder — may also carry its own index page (e.g. /blogs is a page and a dir)
-  const self = node.page ? treeLeaf(node.page, label + ' (index)') : '';
-  const kids = sortedChildren(node).map(treeNode).join('');
-  return `<details class="tfolder"><summary>`
-    + `<span class="tname">${esc(label)}</span><span class="tcount">${treeCount(node)}</span>`
-    + `</summary><div class="tkids">${self}${kids}</div></details>`;
-}
-
-function renderDomainTree(d) {
-  const pages = d.pages || [];
-  const root = buildUrlTree(pages);
-  const home = root.page ? treeLeaf(root.page, '/') : '';
-  const inner = (home + sortedChildren(root).map(treeNode).join(''))
-    || '<div class="muted">No pages scraped for this domain.</div>';
-  const role = d.is_own ? '· you' : '· competitor';
-  return `<details class="tfolder tdomain" open><summary>`
-    + `<span class="tname">${esc(d.domain)}</span>`
-    + `<span class="tcount">${pages.length} pages ${role}</span>`
-    + `</summary><div class="tkids">${inner}</div></details>`;
-}
-
-function closePagesModal() {
-  const modal = document.getElementById('pagesModal');
-  if (modal) modal.hidden = true;
-}
-
-function indexTopics(map) {
-  (map.categories || []).forEach(cat =>
-    (cat.topics || []).forEach(t => { topicsById[String(t.id)] = { ...t, category: cat.label }; }));
-}
-
-async function onTopicClick(topicId) {
-  highlightSelected(mapEl, topicId);
-  const base = apiBase();
-  if (base && !usingSample) {
-    detailEl.innerHTML = '<div class="empty">Loading…</div>';
-    try {
-      const res = await fetch(`${base}/runs/${currentRunId}/topics/${topicId}`);
-      if (!res.ok) throw new Error(`topic ${res.status}`);
-      renderDetail(await res.json());
-      return;
-    } catch (e) { /* fall through to node-only detail */ }
-  }
-  // Sample / offline mode: render from the node we already have (no evidence).
-  const node = topicsById[String(topicId)];
-  if (node) {
-    renderDetail({
-      label: node.label, category: node.category, state: node.state,
-      you_pct: node.you_pct, competitors_pct: node.competitors_pct,
-      detected: { own: [], competitors: [] },
-    }, true);
-  }
-}
-
-function renderDetail(d, sampleMode) {
-  const color = STATE_COLOR[d.state] || '#94a3b8';
-  const terms = labelTerms(d.label);
-  const own = d.detected && d.detected.own ? d.detected.own : [];
-  const comps = d.detected && d.detected.competitors ? d.detected.competitors : [];
-
-  detailEl.innerHTML = `
-    <span class="chip" style="background:${color}">${STATE_LABEL[d.state] || d.state}</span>
-    <h2>${esc(d.label)}</h2>
-    <div class="cat">${esc(d.category || '')}</div>
-
-    <div class="sharebar">
-      ${d.you_pct > 0 ? `<div class="you" style="width:${d.you_pct}%">${d.you_pct}%</div>` : ''}
-      ${d.competitors_pct > 0 ? `<div class="comp" style="width:${d.competitors_pct}%">${d.competitors_pct}%</div>` : ''}
-    </div>
-    <div class="sharelabels"><span>You</span><span>Competitors</span></div>
-
-    <div class="section-title">Content detected on this topic</div>
-    ${sampleMode ? '<p class="col-empty">Sample data — connect the API to see detected sentences.</p>' : ''}
-    <div class="cols">
-      <div>
-        <h3>On your domain</h3>
-        ${own.length ? own.map(e => evidence(e, terms)).join('')
-          : '<p class="col-empty">No content detected on your domain for this topic.</p>'}
-      </div>
-      <div>
-        <h3>On competitors</h3>
-        ${comps.length ? comps.map(e => evidence(e, terms, true)).join('')
-          : '<p class="col-empty">No content detected on competitors for this topic.</p>'}
-      </div>
-    </div>`;
-}
-
-function evidence(e, terms, showDomain) {
-  return `<div class="ev">
-    ${showDomain && e.domain ? `<div class="ev-domain">${esc(e.domain)}</div>` : ''}
-    ${e.title ? `<div class="ev-title">${esc(e.title)}</div>` : ''}
-    <p>${highlight(e.sentence || '', terms)}</p>
-    ${e.url ? `<a class="ev-url" href="${esc(e.url)}" target="_blank" rel="noopener"
-      title="${esc(e.url)}">${esc(prettyUrl(e.url))}</a>
-      <a class="ev-more" href="${esc(e.url)}" target="_blank" rel="noopener">See more →</a>` : ''}
+function gauge(name, cls, val) {
+  const na = val == null;
+  const pct = na ? 0 : Math.max(0, Math.min(100, val));
+  return `<div class="gauge ${cls}">
+    <span class="g-name">${name}</span>
+    <span class="g-track"><span style="width:${pct}%"></span></span>
+    <span class="g-val ${na ? 'na' : ''}">${na ? 'n/a' : Math.round(val)}</span>
   </div>`;
 }
 
-// A compact, readable form of a URL (drop scheme + www, trim length).
-function prettyUrl(url) {
-  let u = String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-  return u.length > 60 ? u.slice(0, 57) + '…' : u;
+function card(c) {
+  const s = c.scores || {};
+  const chips = arr => arr && arr.length
+    ? arr.map(p => `<span class="chip">${esc(p)}</span>`).join('')
+    : '<span class="muted">— none —</span>';
+  return `<div class="cmp-card">
+    <h3>${esc(prettyDomain(c.domain))}</h3>
+    <div class="title">${esc(c.title || '')}</div>
+    <div class="gauge-group"><h4>Headlines</h4>
+      ${gauge('Meaning', 'sem', s.headline_semantic)}
+      ${gauge('Wording', 'lex', s.headline_lexical)}
+    </div>
+    <div class="gauge-group"><h4>Paragraphs</h4>
+      ${gauge('Meaning', 'sem', s.paragraph_semantic)}
+      ${gauge('Wording', 'lex', s.paragraph_lexical)}
+    </div>
+    <div class="shared"><div class="lbl">Shared phrases (headlines):</div>${chips(c.shared_headlines)}</div>
+    ${c.explanation ? `<div class="explain"><div class="lbl">Why</div>${esc(c.explanation)}</div>` : ''}
+  </div>`;
 }
 
-// --- term highlighting ------------------------------------------------------
+// --- scatter (semantic × lexical) -------------------------------------------
+function scatterPanel() {
+  const seg = (id, label) =>
+    `<button data-section="${id}" class="${scatterSection === id ? 'active' : ''}">${label}</button>`;
+  return `<div class="scatter-panel">
+    <div class="scatter-head">
+      <h3>Positioning — meaning vs wording</h3>
+      <div class="seg">${seg('headline', 'Headlines')}${seg('paragraph', 'Paragraphs')}</div>
+    </div>
+    <div class="scatter" id="scatter"></div>
+  </div>`;
+}
 
-const STOP = new Set(['the', 'and', 'for', 'with', 'your', 'guide', 'part', 'topic']);
-function labelTerms(label) {
-  return (label || '').split(/[^A-Za-z0-9]+/)
-    .map(w => w.toLowerCase()).filter(w => w.length > 2 && !STOP.has(w));
-}
-function highlight(sentence, terms) {
-  let out = esc(sentence);
-  terms.forEach(t => {
-    out = out.replace(new RegExp(`\\b(${escapeRe(t)}\\w*)\\b`, 'gi'), '<mark>$1</mark>');
-  });
-  return out;
-}
-function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+function drawScatter() {
+  const el = document.getElementById('scatter');
+  if (!el || !lastReport) return;
+  const pts = (lastReport.competitors || []).map(c => ({
+    name: prettyDomain(c.domain),
+    x: c.scores?.[`${scatterSection}_semantic`],
+    y: c.scores?.[`${scatterSection}_lexical`],
+  })).filter(p => p.x != null && p.y != null);
+
+  const W = 660, H = 380, m = { l: 54, r: 130, t: 20, b: 46 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  // Auto-fit each axis to the data (scores cluster in a narrow band), with padding.
+  const fit = (vals) => {
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1) { lo -= 5; hi += 5; }             // avoid zero range
+    const pad = (hi - lo) * 0.18;
+    return [Math.max(0, lo - pad), Math.min(100, hi + pad)];
+  };
+  const [x0, x1] = fit(pts.map(p => p.x));
+  const [y0, y1] = fit(pts.map(p => p.y));
+  const px = v => m.l + ((v - x0) / (x1 - x0)) * iw;
+  const py = v => m.t + ih - ((v - y0) / (y1 - y0)) * ih;
+
+  const grid = [0.25, 0.5, 0.75].map(f => {
+    const gx = m.l + f * iw, gy = m.t + f * ih;
+    return `<line class="grid" x1="${gx}" y1="${m.t}" x2="${gx}" y2="${m.t + ih}"/>`
+         + `<line class="grid" x1="${m.l}" y1="${gy}" x2="${m.l + iw}" y2="${gy}"/>`;
+  }).join('');
+
+  const dots = pts.map(p => {
+    const x = px(p.x), y = py(p.y);
+    return `<circle class="dot" cx="${x}" cy="${y}" r="5"/>`
+         + `<text class="dot-label" x="${x + 9}" y="${y + 4}">${esc(p.name)}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    <rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="#fff" stroke="var(--line)"/>
+    ${grid}
+    <text class="axis-label" x="${m.l + iw / 2}" y="${H - 12}" text-anchor="middle">Meaning →  same ideas (semantic ${Math.round(x0)}–${Math.round(x1)})</text>
+    <text class="axis-label" transform="translate(16,${m.t + ih / 2}) rotate(-90)" text-anchor="middle">Wording →  same words (lexical ${Math.round(y0)}–${Math.round(y1)})</text>
+    ${dots}
+  </svg>`;
 }
 
 // --- boot -------------------------------------------------------------------
-
 document.getElementById('analyzeForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const own = document.getElementById('ownDomain').value.trim();
   if (!own) return;
   const comps = document.getElementById('compDomains').value
     .split(',').map(s => s.trim()).filter(Boolean);
-  // Blank -> 0 means "all pages" (bounded server-side by the crawl time budget).
-  const maxPages = parseInt(document.getElementById('maxPages').value, 10) || 0;
-  startAnalysis(own, comps, maxPages);
+  startAnalysis(own, comps);
 });
 
-// Close the "scraped pages" modal on backdrop click, the ✕, or Escape; and
-// wire the tree's Expand all / Collapse all buttons.
-const pagesModalEl = document.getElementById('pagesModal');
-if (pagesModalEl) {
-  pagesModalEl.addEventListener('click', (e) => {
-    if (e.target.hasAttribute('data-close')) { closePagesModal(); return; }
-    const btn = e.target.closest('[data-tree]');
-    if (btn) {
-      const open = btn.dataset.tree === 'expand';
-      pagesModalEl.querySelectorAll('#pagesModalBody details').forEach(d => { d.open = open; });
-    }
-  });
-}
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closePagesModal();
+reportEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-section]');
+  if (!btn) return;
+  scatterSection = btn.dataset.section;
+  reportEl.querySelectorAll('.seg button').forEach(b =>
+    b.classList.toggle('active', b.dataset.section === scatterSection));
+  drawScatter();
 });
 
-// Deep-link: ?run=N loads (or resumes polling for) that run. Otherwise wait
-// for the user to enter a domain and click Analyze.
 const qsRun = new URLSearchParams(location.search).get('run');
 if (qsRun) {
-  resumeOrLoad(parseInt(qsRun, 10));
-} else {
-  mapEl.innerHTML = '<div class="muted">Enter your domain and competitors above, then click Analyze.</div>';
-}
-
-// If the linked run is still processing, show progress; if done, show the map.
-async function resumeOrLoad(runId) {
   const base = apiBase();
-  if (!base) { loadMap(runId); return; }
-  try {
-    const info = await (await fetch(`${base}/runs/${runId}`)).json();
-    if (info.status && info.status !== 'done' && info.status !== 'error') {
-      currentRunId = runId;
-      pollRun(runId);
-      return;
-    }
-  } catch (e) { /* fall through to a plain map load */ }
-  loadMap(runId);
+  if (base) {
+    fetch(`${base}/runs/${qsRun}`).then(r => r.json()).then(info => {
+      currentRunId = parseInt(qsRun, 10);
+      if (info.status === 'done') loadReport(currentRunId);
+      else if (info.status && info.status !== 'error') { showAnim(); pollRun(currentRunId); }
+      else statusEl.textContent = 'That run did not finish — start a new comparison.';
+    }).catch(() => { statusEl.textContent = 'Could not load that run.'; });
+  }
 }
