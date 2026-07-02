@@ -94,16 +94,15 @@ class Config:
     max_pages_per_domain: int = field(
         default_factory=lambda: _env_int("TC_MAX_PAGES_PER_DOMAIN", 300)
     )
-    # Politeness / rate-limit avoidance. Lower concurrency + a per-request delay
-    # keep us under a host's rate limiter (e.g. Shopify/Cloudflare 429). With
-    # concurrency 2 and a 0.5s delay we sustain ~4 req/s — enough to crawl a
-    # large site fully without tripping most limiters. Raise for speed on
-    # tolerant hosts; the crawl backs off automatically on 429 either way.
+    # Speed vs politeness. Go fast by default; the crawl backs off automatically
+    # (host-wide cooldown) the moment a host returns 429/503, so we stay quick on
+    # tolerant sites (most) and self-throttle only on strict ones (Shopify etc.).
+    # Lower these via env for a gentler crawl.
     per_host_concurrency: int = field(
-        default_factory=lambda: _env_int("TC_PER_HOST_CONCURRENCY", 2)
+        default_factory=lambda: _env_int("TC_PER_HOST_CONCURRENCY", 8)
     )
     per_request_delay_seconds: float = field(
-        default_factory=lambda: _env_float("TC_PER_REQUEST_DELAY", 0.5)
+        default_factory=lambda: _env_float("TC_PER_REQUEST_DELAY", 0.05)
     )
     request_timeout: float = field(
         default_factory=lambda: _env_float("TC_REQUEST_TIMEOUT", 20.0)

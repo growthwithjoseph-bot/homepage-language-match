@@ -111,13 +111,15 @@ def crawl_domain(
     market_language: str,
     max_pages: Optional[int] = None,
     cfg: Config = config,
+    seed: Optional[List[str]] = None,
 ) -> int:
-    """Discover → fetch → extract → store pages for one domain. Returns count.
+    """Fetch → extract → store pages for one domain. Returns count.
 
-    Starts from the sitemap seed, then harvests on-domain links from fetched
-    pages and follows new ones (cfg.link_augment_rounds hops) so pages a sitemap
-    omits — or a site with no sitemap — are still found. Pages are stored
-    incrementally for live progress. Bounded by max_pages and the time budget.
+    `seed` is the discovered URL list (see discover_urls); when omitted we
+    discover here. From the seed we harvest on-domain links from fetched pages
+    and follow new ones (cfg.link_augment_rounds hops) so pages a sitemap omits
+    — or a site with no sitemap — are still found. Pages are stored incrementally
+    for live progress. Bounded by max_pages and the time budget.
     """
     base = normalize_base(domain)
     base_host = registrable_host(base)
@@ -130,7 +132,8 @@ def crawl_domain(
     else:
         cap = max_pages
 
-    seed = discover_urls(domain, max_pages=max_pages, cfg=cfg)
+    if seed is None:
+        seed = discover_urls(domain, max_pages=max_pages, cfg=cfg)
     seen = set(seed)          # every URL queued (across rounds)
     frontier = list(seed)     # URLs to fetch this round
     harvested = set()         # on-domain links seen in fetched HTML
@@ -199,6 +202,35 @@ def get_run(run_id: int, cfg: Config = config):
         conn.close()
 
 
+def discover_all(domains, max_pages, cfg: Config = config) -> dict:
+    """Discover every domain's URLs up front, in parallel, recording each
+    domain's page count the moment it's known — so all "detected pages" totals
+    appear before any scanning starts (discovery is I/O-bound, so threads help).
+    Returns {domain_id: [urls]}."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    seeds = {}
+    if not domains:
+        return seeds
+    with ThreadPoolExecutor(max_workers=min(len(domains), 8)) as ex:
+        futs = {ex.submit(discover_urls, d["domain"], max_pages, cfg): d for d in domains}
+        for fut in as_completed(futs):
+            d = futs[fut]
+            try:
+                urls = fut.result()
+            except Exception:
+                urls = []
+            seeds[d["id"]] = urls
+            conn = get_connection(cfg.db_path)
+            try:
+                conn.execute("UPDATE domains SET discovered=? WHERE id=?", (len(urls), d["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+            print(f"  [{d['domain']}] detected {len(urls)} pages")
+    return seeds
+
+
 def execute_run(run_id: int, cfg: Config = config) -> int:
     """Run all pipeline stages (M1→M4) for an already-created run."""
     run = get_run(run_id, cfg=cfg)
@@ -208,8 +240,13 @@ def execute_run(run_id: int, cfg: Config = config) -> int:
     cap = run["max_pages"]
     set_run_status(run_id, "running", cfg=cfg)
     try:
-        for d in get_domains(run_id, cfg=cfg):
-            n = crawl_domain(d["id"], d["domain"], lang, max_pages=cap, cfg=cfg)
+        domains = get_domains(run_id, cfg=cfg)
+        # Phase 1: detect pages for ALL domains first (parallel) so every total
+        # shows immediately; Phase 2: scan each using its precomputed seed.
+        seeds = discover_all(domains, cap, cfg=cfg)
+        for d in domains:
+            n = crawl_domain(d["id"], d["domain"], lang, max_pages=cap, cfg=cfg,
+                             seed=seeds.get(d["id"]))
             print(f"  [{d['domain']}] stored {n} pages")
         set_run_status(run_id, "crawled", cfg=cfg)
 
