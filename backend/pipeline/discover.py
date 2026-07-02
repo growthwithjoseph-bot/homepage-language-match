@@ -163,8 +163,11 @@ def discover_urls(
 
     candidates = _from_sitemaps(base, cfg.sitemap_timeout_seconds)
     if not candidates:
+        # No sitemap -> follow links. Bound by the smaller of the requested cap
+        # and the focused-crawl ceiling so we don't over-crawl for a small ask.
+        focused_max = min(cap, cfg.focused_crawl_max_urls)
         candidates = _from_focused_crawl(
-            base, cfg.focused_crawl_max_urls, cfg.focused_crawl_timeout_seconds
+            base, focused_max, cfg.focused_crawl_timeout_seconds
         )
 
     # Filter, dedupe (stable order), and cap.

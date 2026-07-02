@@ -144,16 +144,20 @@ class Config:
     crawl_time_budget_max_seconds: float = field(
         default_factory=lambda: _env_float("TC_CRAWL_TIME_BUDGET_MAX", 1800.0)
     )
-    # Hard cap on the sitemap-less focused-crawl fallback (live crawling is
-    # slow). Sites WITH a sitemap aren't affected by this.
+    # Ceiling on the sitemap-less focused-crawl fallback (link-following is slow
+    # since each page must be fetched to find more). Sites WITH a sitemap aren't
+    # affected. The effective cap is min(this, requested max_pages), so asking
+    # for fewer pages still stops early. Raised from 80 so sitemap-less sites
+    # aren't silently truncated to a fraction of their pages.
     focused_crawl_max_urls: int = field(
-        default_factory=lambda: _env_int("TC_FOCUSED_CRAWL_MAX_URLS", 80)
+        default_factory=lambda: _env_int("TC_FOCUSED_CRAWL_MAX_URLS", 500)
     )
     # Wall-clock limit on the focused-crawl fallback itself (it has no internal
     # timeout and can hang on slow sites). On timeout we proceed with whatever
-    # URLs we have (at least the homepage). 0 = no limit.
+    # URLs we have (at least the homepage). 0 = no limit. Generous so link
+    # discovery has time to reach most of a sitemap-less site.
     focused_crawl_timeout_seconds: float = field(
-        default_factory=lambda: _env_float("TC_FOCUSED_CRAWL_TIMEOUT", 45.0)
+        default_factory=lambda: _env_float("TC_FOCUSED_CRAWL_TIMEOUT", 120.0)
     )
     # Wall-clock limit on reading/expanding sitemaps (huge sitemap trees, e.g.
     # notion.com, can take very long). On timeout we fall back to a focused

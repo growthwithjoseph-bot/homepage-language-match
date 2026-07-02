@@ -7,6 +7,7 @@ import httpx
 
 from backend.config import Config
 from backend.db import get_connection, init_db
+from backend.pipeline import discover as disc_mod
 from backend.pipeline import fetch as fetch_mod
 from backend.pipeline.discover import is_content_url, normalize_base, registrable_host
 from backend.pipeline.extract import extract_page
@@ -57,6 +58,24 @@ def test_extract_page_from_html():
     assert page is not None
     assert page.text and "Gantt" in page.text
     assert page.lang == "en"
+
+
+def test_focused_crawl_cap_respects_requested_max(monkeypatch):
+    """Sitemap-less fallback: bounded by min(requested max_pages, ceiling)."""
+    monkeypatch.setattr(disc_mod, "_from_sitemaps", lambda base, timeout: [])  # force fallback
+    seen = {}
+
+    def fake_focused(base, max_urls, timeout=0.0):
+        seen["max"] = max_urls
+        return [f"{base}/p{i}" for i in range(max_urls)]
+
+    monkeypatch.setattr(disc_mod, "_from_focused_crawl", fake_focused)
+    cfg = Config(focused_crawl_max_urls=500)
+
+    disc_mod.discover_urls("https://x.com", max_pages=0, cfg=cfg)   # "all" -> ceiling
+    assert seen["max"] == 500
+    disc_mod.discover_urls("https://x.com", max_pages=30, cfg=cfg)  # small ask -> that many
+    assert seen["max"] == 30
 
 
 def test_crawl_deadline_scales_with_urls():
