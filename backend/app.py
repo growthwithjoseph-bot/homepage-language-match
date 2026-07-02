@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from .config import config
 from .db import (
     build_map,
+    build_report,
     build_topic_detail,
     domain_page_counts,
     fail_orphaned_runs,
@@ -120,6 +121,15 @@ def run_status(run_id: int):
         "counts": counts,
         "domains": domains,
     }
+
+
+@app.get("/runs/{run_id}/report")
+def run_report(run_id: int):
+    """Homepage language-similarity report: own domain + per-competitor scores."""
+    data = build_report(run_id)
+    if data is None:
+        raise HTTPException(404, "run not found")
+    return data
 
 
 @app.get("/runs/{run_id}/map")

@@ -11,7 +11,7 @@ import time
 from typing import List, Optional
 
 from ..config import Config, config
-from ..db import get_connection, init_db
+from ..db import get_connection, init_db, store_homepage, store_similarity
 from .chunk_embed import embed_run
 from .coverage import score_coverage
 from .discover import (
@@ -23,6 +23,8 @@ from .discover import (
 )
 from .extract import extract_page
 from .fetch import fetch_all
+from .homepage import extract_homepage
+from .scoring import build_profile, score
 from .topics import discover_topics
 
 
@@ -231,38 +233,50 @@ def discover_all(domains, max_pages, cfg: Config = config) -> dict:
     return seeds
 
 
+def _fetch_homepages(domains, cfg: Config) -> dict:
+    """Fetch each domain's homepage (one request each, run concurrently) and
+    extract its headlines + paragraphs. Returns {domain_id: HomepageContent}."""
+    urls = {d["id"]: normalize_base(d["domain"]) for d in domains}
+    got = {}
+    fetch_all(list(dict.fromkeys(urls.values())), cfg=cfg,
+              on_result=lambda r: got.__setitem__(r.url, r))
+    out = {}
+    for d in domains:
+        u = urls[d["id"]]
+        res = got.get(u)
+        out[d["id"]] = extract_homepage(res.html if res is not None else "", u)
+    return out
+
+
 def execute_run(run_id: int, cfg: Config = config) -> int:
-    """Run all pipeline stages (M1→M4) for an already-created run."""
+    """Homepage language-similarity: fetch every domain's homepage, extract its
+    headlines + paragraphs, and score each competitor's similarity to the own
+    domain (semantic + lexical). The LLM explanation is added in a later step."""
     run = get_run(run_id, cfg=cfg)
     if run is None:
         raise ValueError(f"run {run_id} not found")
-    lang = run["market_language"]
-    cap = run["max_pages"]
     set_run_status(run_id, "running", cfg=cfg)
     try:
-        domains = get_domains(run_id, cfg=cfg)
-        # Phase 1: detect pages for ALL domains first (parallel) so every total
-        # shows immediately; Phase 2: scan each using its precomputed seed.
-        seeds = discover_all(domains, cap, cfg=cfg)
+        domains = get_domains(run_id, cfg=cfg)          # own domain first
+        own = next((d for d in domains if d["is_own"]), None)
+        if own is None:
+            raise ValueError("run has no own domain")
+
+        contents = _fetch_homepages(domains, cfg)
         for d in domains:
-            n = crawl_domain(d["id"], d["domain"], lang, max_pages=cap, cfg=cfg,
-                             seed=seeds.get(d["id"]))
-            print(f"  [{d['domain']}] stored {n} pages")
-        set_run_status(run_id, "crawled", cfg=cfg)
+            store_homepage(d["id"], contents[d["id"]], db_path=cfg.db_path)
+            hp = contents[d["id"]]
+            print(f"  [{d['domain']}] {len(hp.headlines)} headlines, "
+                  f"{len(hp.paragraphs)} paragraphs")
 
-        # M2 — chunk + embed every page across all domains.
-        n_chunks = embed_run(run_id, cfg=cfg)
-        print(f"  embedded {n_chunks} chunks")
-        set_run_status(run_id, "embedded", cfg=cfg)
-
-        # M3 — discover topics + categories over all chunks (global).
-        n_topics, n_cats = discover_topics(run_id, cfg=cfg)
-        print(f"  discovered {n_topics} topics in {n_cats} categories")
-        set_run_status(run_id, "topiced", cfg=cfg)
-
-        # M4 — coverage strength, share, and state per topic.
-        n_scored = score_coverage(run_id, cfg=cfg)
-        print(f"  scored coverage for {n_scored} topics")
+        profiles = {did: build_profile(c, cfg) for did, c in contents.items()}
+        own_profile = profiles[own["id"]]
+        for d in domains:
+            if d["is_own"]:
+                continue
+            s = score(own_profile, profiles[d["id"]], cfg)
+            store_similarity(run_id, d["id"], s, explanation=None, db_path=cfg.db_path)
+            print(f"  [{d['domain']}] scored")
         set_run_status(run_id, "done", cfg=cfg)
     except Exception:
         set_run_status(run_id, "error", cfg=cfg)

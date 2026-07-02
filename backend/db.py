@@ -92,6 +92,29 @@ CREATE TABLE IF NOT EXISTS topic_state (
     competitors_pct  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Homepage-compare tables (the language-similarity tool).
+CREATE TABLE IF NOT EXISTS homepages (
+    domain_id   INTEGER PRIMARY KEY REFERENCES domains(id) ON DELETE CASCADE,
+    url         TEXT,
+    title       TEXT,
+    headlines   TEXT,   -- JSON array of headline strings
+    paragraphs  TEXT,   -- JSON array of paragraph strings
+    fetched_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS similarity (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id            INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    domain_id         INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,  -- the competitor
+    h_semantic        REAL,
+    h_lexical         REAL,
+    p_semantic        REAL,
+    p_lexical         REAL,
+    shared_headlines  TEXT,   -- JSON array
+    shared_paragraphs TEXT,   -- JSON array
+    explanation       TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_pages_domain   ON pages(domain_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_run     ON chunks(run_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_domain  ON chunks(domain_id);
@@ -99,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_topic   ON chunks(topic_id);
 CREATE INDEX IF NOT EXISTS idx_topics_run     ON topics(run_id);
 CREATE INDEX IF NOT EXISTS idx_cov_run        ON topic_coverage(run_id);
 CREATE INDEX IF NOT EXISTS idx_state_run      ON topic_state(run_id);
+CREATE INDEX IF NOT EXISTS idx_sim_run        ON similarity(run_id);
 """
 
 # Tables we expect to exist after init — used by the M0 acceptance check.
@@ -225,6 +249,106 @@ def run_counts(conn: sqlite3.Connection, run_id: int) -> dict:
         "topics": one("SELECT COUNT(*) FROM topics WHERE run_id=?"),
         "categories": one("SELECT COUNT(*) FROM categories WHERE run_id=?"),
     }
+
+
+# --- homepage-compare storage + report -------------------------------------
+
+def store_homepage(domain_id: int, content, db_path: Optional[Path] = None) -> None:
+    """Save a domain's extracted homepage (headlines + paragraphs)."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO homepages (domain_id, url, title, headlines, paragraphs) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(domain_id) DO UPDATE SET url=excluded.url, title=excluded.title, "
+            "headlines=excluded.headlines, paragraphs=excluded.paragraphs",
+            (domain_id, content.url, content.title,
+             _json.dumps(content.headlines), _json.dumps(content.paragraphs)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def store_similarity(run_id: int, domain_id: int, scores,
+                     explanation: Optional[str] = None,
+                     db_path: Optional[Path] = None) -> None:
+    """Save one competitor's similarity sub-scores + lexical evidence."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO similarity (run_id, domain_id, h_semantic, h_lexical, "
+            "p_semantic, p_lexical, shared_headlines, shared_paragraphs, explanation) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, domain_id, scores.headline_semantic, scores.headline_lexical,
+             scores.paragraph_semantic, scores.paragraph_lexical,
+             _json.dumps(scores.shared_headline_phrases),
+             _json.dumps(scores.shared_paragraph_phrases), explanation),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def build_report(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
+    """Assemble the homepage-comparison report: own domain + per-competitor
+    sub-scores, lexical evidence, and explanation (SPEC: the compare tool)."""
+    conn = get_connection(db_path)
+    try:
+        run = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        if run is None:
+            return None
+        doms = conn.execute(
+            "SELECT id, domain, is_own FROM domains WHERE run_id=? ORDER BY is_own DESC, id",
+            (run_id,),
+        ).fetchall()
+
+        def homepage_meta(domain_id):
+            hp = conn.execute(
+                "SELECT title, headlines, paragraphs FROM homepages WHERE domain_id=?",
+                (domain_id,),
+            ).fetchone()
+            if hp is None:
+                return {"title": "", "headline_count": 0, "paragraph_count": 0}
+            return {
+                "title": hp["title"] or "",
+                "headline_count": len(_json.loads(hp["headlines"] or "[]")),
+                "paragraph_count": len(_json.loads(hp["paragraphs"] or "[]")),
+            }
+
+        own_row = next((d for d in doms if d["is_own"]), None)
+        own = None
+        if own_row is not None:
+            own = {"domain": own_row["domain"], **homepage_meta(own_row["id"])}
+
+        competitors = []
+        for d in doms:
+            if d["is_own"]:
+                continue
+            sim = conn.execute(
+                "SELECT * FROM similarity WHERE run_id=? AND domain_id=?",
+                (run_id, d["id"]),
+            ).fetchone()
+            entry = {"domain": d["domain"], **homepage_meta(d["id"])}
+            entry["scores"] = {
+                "headline_semantic": sim["h_semantic"] if sim else None,
+                "headline_lexical": sim["h_lexical"] if sim else None,
+                "paragraph_semantic": sim["p_semantic"] if sim else None,
+                "paragraph_lexical": sim["p_lexical"] if sim else None,
+            }
+            entry["shared_headlines"] = _json.loads(sim["shared_headlines"]) if sim and sim["shared_headlines"] else []
+            entry["shared_paragraphs"] = _json.loads(sim["shared_paragraphs"]) if sim and sim["shared_paragraphs"] else []
+            entry["explanation"] = sim["explanation"] if sim else None
+            competitors.append(entry)
+
+        return {
+            "run_id": run_id,
+            "status": run["status"],
+            "own": own,
+            "competitors": competitors,
+        }
+    finally:
+        conn.close()
 
 
 def domain_page_counts(conn: sqlite3.Connection, run_id: int) -> list:
