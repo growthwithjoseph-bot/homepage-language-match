@@ -93,10 +93,18 @@
   .crawl-caption span:nth-child(3) { animation-delay: 6s; }
   @keyframes csCap { 0% { opacity: 0; } 3% { opacity: 1; } 30% { opacity: 1; } 34% { opacity: 0; }
     100% { opacity: 0; } }
+  /* Scenery behind the dog: park → mountains → city → garden → beach, crossfading. */
+  .bgscene { opacity: 0; animation: bgCycle 25s linear infinite; }
+  .bgscene.bg2 { animation-delay: 5s; }
+  .bgscene.bg3 { animation-delay: 10s; }
+  .bgscene.bg4 { animation-delay: 15s; }
+  .bgscene.bg5 { animation-delay: 20s; }
+  @keyframes bgCycle { 0% { opacity: 0; } 3% { opacity: 1; } 18% { opacity: 1; } 21% { opacity: 0; }
+    100% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) {
     .cs-ball, .cs-ball-bounce, .cs-dog, .cs-dog-bob, .cs-leg-a, .cs-leg-b, .cs-tail,
-    .crawl-caption span { animation: none; }
-    .crawl-caption span:nth-child(1) { opacity: 1; }
+    .bgscene, .crawl-caption span { animation: none; }
+    .crawl-caption span:nth-child(1), .bgscene.bg1 { opacity: 1; }
   }
   .pages-analysed { margin-top: 14px; display: flex; gap: 8px; align-items: center;
     flex-wrap: wrap; font-size: 12.5px; }

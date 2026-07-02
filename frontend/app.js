@@ -29,25 +29,80 @@ function apiBase() {
 // pure CSS/SVG (see index.html for the keyframes), so it costs nothing to run.
 const CRAWL_ANIM_HTML = `
   <div class="crawl-anim" id="crawlScene">
-    <svg class="crawl-scene" viewBox="0 0 280 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <line class="cs-ground" x1="8" y1="76" x2="272" y2="76" />
-      <g class="cs-ball"><g class="cs-ball-bounce">
-        <circle cx="70" cy="68" r="8" fill="#f59e0b" />
-        <circle cx="67" cy="65" r="2.5" fill="#fff" opacity=".8" />
-      </g></g>
-      <g class="cs-dog"><g class="cs-dog-bob" fill="#8b5e3c">
-        <path class="cs-tail" d="M6 56 C -4 52 -4 44 2 44 C 4 48 8 52 10 54 Z" />
-        <rect class="cs-leg cs-leg-a" x="12" y="62" width="4.5" height="14" rx="2.2" />
-        <rect class="cs-leg cs-leg-b" x="22" y="62" width="4.5" height="14" rx="2.2" />
-        <rect class="cs-leg cs-leg-a" x="33" y="62" width="4.5" height="14" rx="2.2" />
-        <rect class="cs-leg cs-leg-b" x="41" y="62" width="4.5" height="14" rx="2.2" />
-        <ellipse cx="27" cy="57" rx="21" ry="11" />
-        <circle cx="47" cy="48" r="9" />
-        <path d="M40 41 C 36 34 44 33 45 40 Z" />
-        <rect x="53" y="48" width="9" height="7" rx="3.5" />
-        <circle cx="61" cy="49" r="2" fill="#3b2a1a" />
-        <circle cx="49" cy="46" r="1.6" fill="#3b2a1a" />
-      </g></g>
+    <svg class="crawl-scene" viewBox="0 0 280 130" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs><clipPath id="csClip"><rect x="0" y="0" width="280" height="130" rx="12"/></clipPath></defs>
+      <g clip-path="url(#csClip)">
+        <!-- 1. Park -->
+        <g class="bgscene bg1">
+          <rect width="280" height="130" fill="#d7eefe"/>
+          <circle cx="242" cy="26" r="12" fill="#fde68a"/>
+          <rect y="104" width="280" height="26" fill="#8fe0a0"/>
+          <rect x="46" y="84" width="6" height="28" fill="#7c5c3b"/>
+          <rect x="98" y="90" width="6" height="22" fill="#7c5c3b"/>
+          <circle cx="49" cy="78" r="18" fill="#3fae60"/>
+          <circle cx="101" cy="84" r="13" fill="#3fae60"/>
+        </g>
+        <!-- 2. Mountains -->
+        <g class="bgscene bg2">
+          <rect width="280" height="130" fill="#dbeafe"/>
+          <polygon points="6,114 66,48 128,114" fill="#9aa7bd"/>
+          <polygon points="52,66 66,48 80,66" fill="#ffffff"/>
+          <polygon points="120,114 184,38 250,114" fill="#8593ab"/>
+          <polygon points="169,58 184,38 199,58" fill="#ffffff"/>
+          <rect y="110" width="280" height="20" fill="#a7d9b4"/>
+        </g>
+        <!-- 3. City -->
+        <g class="bgscene bg3">
+          <rect width="280" height="130" fill="#e2e8ff"/>
+          <rect x="22" y="66" width="30" height="54" fill="#64748b"/>
+          <rect x="58" y="50" width="26" height="70" fill="#475569"/>
+          <rect x="90" y="76" width="24" height="44" fill="#7c8aa0"/>
+          <rect x="168" y="56" width="28" height="64" fill="#52607a"/>
+          <rect x="202" y="72" width="30" height="48" fill="#647089"/>
+          <rect x="236" y="46" width="22" height="74" fill="#465063"/>
+          <g fill="#fbbf24"><rect x="64" y="58" width="4" height="5"/><rect x="72" y="58" width="4" height="5"/><rect x="64" y="70" width="4" height="5"/><rect x="174" y="64" width="4" height="5"/><rect x="242" y="56" width="4" height="5"/></g>
+          <rect y="118" width="280" height="12" fill="#c3ccd9"/>
+        </g>
+        <!-- 4. Garden of a house -->
+        <g class="bgscene bg4">
+          <rect width="280" height="130" fill="#d7eefe"/>
+          <rect y="104" width="280" height="26" fill="#8fe0a0"/>
+          <polygon points="146,74 182,44 218,74" fill="#c1553f"/>
+          <rect x="152" y="74" width="60" height="46" fill="#f4c58a"/>
+          <rect x="176" y="96" width="14" height="24" fill="#7c5c3b"/>
+          <rect x="194" y="84" width="12" height="12" fill="#bfe3f5"/>
+          <g fill="#f472b6"><circle cx="30" cy="112" r="3"/><circle cx="60" cy="116" r="3"/><circle cx="92" cy="112" r="3"/></g>
+          <g fill="#fbbf24"><circle cx="30" cy="112" r="1.2"/><circle cx="60" cy="116" r="1.2"/><circle cx="92" cy="112" r="1.2"/></g>
+        </g>
+        <!-- 5. Beach -->
+        <g class="bgscene bg5">
+          <rect width="280" height="130" fill="#cfeafd"/>
+          <circle cx="44" cy="28" r="13" fill="#fde68a"/>
+          <rect y="94" width="280" height="22" fill="#38bdf8"/>
+          <rect y="114" width="280" height="16" fill="#f6df9c"/>
+          <rect x="232" y="80" width="5" height="36" fill="#8a6a44"/>
+          <g fill="#3fae60"><ellipse cx="226" cy="80" rx="12" ry="5"/><ellipse cx="244" cy="80" rx="12" ry="5"/><ellipse cx="234" cy="74" rx="6" ry="11"/></g>
+        </g>
+        <!-- ball -->
+        <g transform="translate(0,44)"><g class="cs-ball"><g class="cs-ball-bounce">
+          <circle cx="70" cy="68" r="8" fill="#f59e0b"/>
+          <circle cx="67" cy="65" r="2.5" fill="#fff" opacity=".8"/>
+        </g></g></g>
+        <!-- dog -->
+        <g transform="translate(0,44)"><g class="cs-dog"><g class="cs-dog-bob" fill="#8b5e3c">
+          <path class="cs-tail" d="M6 56 C -4 52 -4 44 2 44 C 4 48 8 52 10 54 Z"/>
+          <rect class="cs-leg cs-leg-a" x="12" y="62" width="4.5" height="14" rx="2.2"/>
+          <rect class="cs-leg cs-leg-b" x="22" y="62" width="4.5" height="14" rx="2.2"/>
+          <rect class="cs-leg cs-leg-a" x="33" y="62" width="4.5" height="14" rx="2.2"/>
+          <rect class="cs-leg cs-leg-b" x="41" y="62" width="4.5" height="14" rx="2.2"/>
+          <ellipse cx="27" cy="57" rx="21" ry="11"/>
+          <circle cx="47" cy="48" r="9"/>
+          <path d="M40 41 C 36 34 44 33 45 40 Z"/>
+          <rect x="53" y="48" width="9" height="7" rx="3.5"/>
+          <circle cx="61" cy="49" r="2" fill="#3b2a1a"/>
+          <circle cx="49" cy="46" r="1.6" fill="#3b2a1a"/>
+        </g></g></g>
+      </g>
     </svg>
     <div class="crawl-caption">
       <span>Fetching every page we can find…</span>
