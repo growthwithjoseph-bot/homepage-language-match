@@ -103,12 +103,20 @@ def deterministic_explanation(comp_name: str, s: SimilarityScores) -> str:
     return out
 
 
+def explain_with_source(own_name: str, comp_name: str, own: HomepageContent,
+                        comp: HomepageContent, s: SimilarityScores,
+                        cfg: Config = config):
+    """Return (explanation, used_ai). used_ai is True only when the LLM produced
+    the text — so the UI can honestly label it 'AI explains' vs the fallback."""
+    if cfg.explanation_enabled:
+        text = _chat(_prompt(own_name, comp_name, own, comp, s), cfg)
+        if text:
+            return text, True
+    return deterministic_explanation(comp_name, s), False
+
+
 def explain(own_name: str, comp_name: str, own: HomepageContent,
             comp: HomepageContent, s: SimilarityScores,
             cfg: Config = config) -> str:
     """LLM explanation if enabled + reachable; otherwise the deterministic one."""
-    if cfg.explanation_enabled:
-        text = _chat(_prompt(own_name, comp_name, own, comp, s), cfg)
-        if text:
-            return text
-    return deterministic_explanation(comp_name, s)
+    return explain_with_source(own_name, comp_name, own, comp, s, cfg)[0]

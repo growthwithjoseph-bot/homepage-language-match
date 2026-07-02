@@ -144,8 +144,9 @@ function renderReport(rep) {
        <div class="lbl">Your homepage</div>
        <h2>${esc(own.title || prettyDomain(own.domain))}</h2>
        <div class="meta">${esc(prettyDomain(own.domain))} · ${own.headline_count || 0} headlines · ${own.paragraph_count || 0} paragraphs</div>
+       ${extractedText(own)}
      </div>
-     <p class="legend-line">Each score is 0–100. <b class="sem">Meaning</b> = semantic similarity (same ideas, even in different words). <b class="lex">Wording</b> = lexical overlap (same actual words/phrases).</p>
+     <p class="legend-line">Every score is a <b>0–100 similarity index</b> (not a percentage): <b>100</b> = essentially identical, <b>0</b> = unrelated. <b class="sem">Meaning</b> = same ideas, even in different words. <b class="lex">Wording</b> = the same actual words/phrases.</p>
      ${comps.length >= 1 ? scatterPanel() : ''}
      <div class="cmp-grid">${comps.map(card).join('') || '<p class="muted">No competitors.</p>'}</div>`;
   reportEl.hidden = false;
@@ -159,8 +160,21 @@ function gauge(name, cls, val) {
   return `<div class="gauge ${cls}">
     <span class="g-name">${name}</span>
     <span class="g-track"><span style="width:${pct}%"></span></span>
-    <span class="g-val ${na ? 'na' : ''}">${na ? 'n/a' : Math.round(val)}</span>
+    <span class="g-val ${na ? 'na' : ''}">${na ? 'n/a' : Math.round(val)}<span class="g-unit">/100</span></span>
   </div>`;
+}
+
+// A collapsible list of the exact headlines + paragraphs we pulled from a page,
+// so the user can read what was actually analysed.
+function extractedText(m) {
+  const sec = (title, items) => `<div class="ex-sec"><h5>${title} <span class="muted">(${(items || []).length})</span></h5>`
+    + ((items && items.length)
+        ? `<ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`
+        : '<p class="muted">None found.</p>') + `</div>`;
+  return `<details class="extracted">
+    <summary>Read the text we analysed</summary>
+    <div class="ex-body">${sec('Headlines', m.headlines)}${sec('Paragraphs', m.paragraphs)}</div>
+  </details>`;
 }
 
 function card(c) {
@@ -168,6 +182,7 @@ function card(c) {
   const chips = arr => arr && arr.length
     ? arr.map(p => `<span class="chip">${esc(p)}</span>`).join('')
     : '<span class="muted">— none —</span>';
+  const whyLabel = c.explanation_ai ? 'Why · AI explains' : 'Why · how these compare';
   return `<div class="cmp-card">
     <h3>${esc(prettyDomain(c.domain))}</h3>
     <div class="title">${esc(c.title || '')}</div>
@@ -180,7 +195,8 @@ function card(c) {
       ${gauge('Wording', 'lex', s.paragraph_lexical)}
     </div>
     <div class="shared"><div class="lbl">Shared phrases (headlines):</div>${chips(c.shared_headlines)}</div>
-    ${c.explanation ? `<div class="explain"><div class="lbl">Why</div>${esc(c.explanation)}</div>` : ''}
+    ${c.explanation ? `<div class="explain"><div class="lbl">${whyLabel}</div>${esc(c.explanation)}</div>` : ''}
+    ${extractedText(c)}
   </div>`;
 }
 
@@ -220,23 +236,30 @@ function drawScatter() {
   const px = v => m.l + ((v - x0) / (x1 - x0)) * iw;
   const py = v => m.t + ih - ((v - y0) / (y1 - y0)) * ih;
 
-  const grid = [0.25, 0.5, 0.75].map(f => {
-    const gx = m.l + f * iw, gy = m.t + f * ih;
-    return `<line class="grid" x1="${gx}" y1="${m.t}" x2="${gx}" y2="${m.t + ih}"/>`
-         + `<line class="grid" x1="${m.l}" y1="${gy}" x2="${m.l + iw}" y2="${gy}"/>`;
+  // Gridlines + numeric tick labels on both axes so values are readable.
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  const gridTicks = ticks.map(f => {
+    const gx = m.l + f * iw, gy = m.t + ih - f * ih;
+    const xv = Math.round(x0 + f * (x1 - x0)), yv = Math.round(y0 + f * (y1 - y0));
+    const lines = (f > 0 && f < 1)
+      ? `<line class="grid" x1="${gx}" y1="${m.t}" x2="${gx}" y2="${m.t + ih}"/>`
+      + `<line class="grid" x1="${m.l}" y1="${gy}" x2="${m.l + iw}" y2="${gy}"/>` : '';
+    return lines
+      + `<text class="tick" x="${gx}" y="${m.t + ih + 16}" text-anchor="middle">${xv}</text>`
+      + `<text class="tick" x="${m.l - 8}" y="${gy + 4}" text-anchor="end">${yv}</text>`;
   }).join('');
 
   const dots = pts.map(p => {
     const x = px(p.x), y = py(p.y);
     return `<circle class="dot" cx="${x}" cy="${y}" r="5"/>`
-         + `<text class="dot-label" x="${x + 9}" y="${y + 4}">${esc(p.name)}</text>`;
+         + `<text class="dot-label" x="${x + 9}" y="${y + 4}">${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})</text>`;
   }).join('');
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
     <rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="#fff" stroke="var(--line)"/>
-    ${grid}
-    <text class="axis-label" x="${m.l + iw / 2}" y="${H - 12}" text-anchor="middle">Meaning →  same ideas (semantic ${Math.round(x0)}–${Math.round(x1)})</text>
-    <text class="axis-label" transform="translate(16,${m.t + ih / 2}) rotate(-90)" text-anchor="middle">Wording →  same words (lexical ${Math.round(y0)}–${Math.round(y1)})</text>
+    ${gridTicks}
+    <text class="axis-label" x="${m.l + iw / 2}" y="${H - 6}" text-anchor="middle">Meaning score →  (same ideas, 0–100)</text>
+    <text class="axis-label" transform="translate(14,${m.t + ih / 2}) rotate(-90)" text-anchor="middle">Wording score →  (same words, 0–100)</text>
     ${dots}
   </svg>`;
 }

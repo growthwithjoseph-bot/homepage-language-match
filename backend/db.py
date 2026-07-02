@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS similarity (
     p_lexical         REAL,
     shared_headlines  TEXT,   -- JSON array
     shared_paragraphs TEXT,   -- JSON array
-    explanation       TEXT
+    explanation       TEXT,
+    explanation_ai    INTEGER NOT NULL DEFAULT 0   -- 1 = LLM, 0 = deterministic fallback
 );
 
 CREATE INDEX IF NOT EXISTS idx_pages_domain   ON pages(domain_id);
@@ -169,6 +170,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(domains)")}
     if "discovered" not in cols:
         conn.execute("ALTER TABLE domains ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")
+    sim_cols = {r["name"] for r in conn.execute("PRAGMA table_info(similarity)")}
+    if sim_cols and "explanation_ai" not in sim_cols:
+        conn.execute("ALTER TABLE similarity ADD COLUMN explanation_ai INTEGER NOT NULL DEFAULT 0")
 
 
 # Statuses a run can rest in permanently. Anything else means a worker was
@@ -272,18 +276,20 @@ def store_homepage(domain_id: int, content, db_path: Optional[Path] = None) -> N
 
 def store_similarity(run_id: int, domain_id: int, scores,
                      explanation: Optional[str] = None,
+                     explanation_ai: bool = False,
                      db_path: Optional[Path] = None) -> None:
     """Save one competitor's similarity sub-scores + lexical evidence."""
     conn = get_connection(db_path)
     try:
         conn.execute(
             "INSERT INTO similarity (run_id, domain_id, h_semantic, h_lexical, "
-            "p_semantic, p_lexical, shared_headlines, shared_paragraphs, explanation) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "p_semantic, p_lexical, shared_headlines, shared_paragraphs, explanation, "
+            "explanation_ai) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (run_id, domain_id, scores.headline_semantic, scores.headline_lexical,
              scores.paragraph_semantic, scores.paragraph_lexical,
              _json.dumps(scores.shared_headline_phrases),
-             _json.dumps(scores.shared_paragraph_phrases), explanation),
+             _json.dumps(scores.shared_paragraph_phrases), explanation,
+             1 if explanation_ai else 0),
         )
         conn.commit()
     finally:
@@ -309,11 +315,14 @@ def build_report(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
                 (domain_id,),
             ).fetchone()
             if hp is None:
-                return {"title": "", "headline_count": 0, "paragraph_count": 0}
+                return {"title": "", "headlines": [], "paragraphs": [],
+                        "headline_count": 0, "paragraph_count": 0}
+            headlines = _json.loads(hp["headlines"] or "[]")
+            paragraphs = _json.loads(hp["paragraphs"] or "[]")
             return {
                 "title": hp["title"] or "",
-                "headline_count": len(_json.loads(hp["headlines"] or "[]")),
-                "paragraph_count": len(_json.loads(hp["paragraphs"] or "[]")),
+                "headlines": headlines, "paragraphs": paragraphs,
+                "headline_count": len(headlines), "paragraph_count": len(paragraphs),
             }
 
         own_row = next((d for d in doms if d["is_own"]), None)
@@ -339,6 +348,7 @@ def build_report(run_id: int, db_path: Optional[Path] = None) -> Optional[dict]:
             entry["shared_headlines"] = _json.loads(sim["shared_headlines"]) if sim and sim["shared_headlines"] else []
             entry["shared_paragraphs"] = _json.loads(sim["shared_paragraphs"]) if sim and sim["shared_paragraphs"] else []
             entry["explanation"] = sim["explanation"] if sim else None
+            entry["explanation_ai"] = bool(sim["explanation_ai"]) if sim else False
             competitors.append(entry)
 
         return {

@@ -21,7 +21,7 @@ from .discover import (
     normalize_base,
     registrable_host,
 )
-from .explain import explain
+from .explain import explain_with_source
 from .extract import extract_page
 from .fetch import fetch_all
 from .homepage import extract_homepage
@@ -278,9 +278,10 @@ def execute_run(run_id: int, cfg: Config = config) -> int:
                 continue
             s = score(own_profile, profiles[d["id"]], cfg)
             comp_name = normalize_base(d["domain"]).split("//")[-1]
-            why = explain(own_name, comp_name, contents[own["id"]],
-                          contents[d["id"]], s, cfg)
-            store_similarity(run_id, d["id"], s, explanation=why, db_path=cfg.db_path)
+            why, used_ai = explain_with_source(own_name, comp_name, contents[own["id"]],
+                                               contents[d["id"]], s, cfg)
+            store_similarity(run_id, d["id"], s, explanation=why,
+                             explanation_ai=used_ai, db_path=cfg.db_path)
             print(f"  [{d['domain']}] scored + explained")
         set_run_status(run_id, "done", cfg=cfg)
     except Exception:
