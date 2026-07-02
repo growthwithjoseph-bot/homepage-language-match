@@ -165,6 +165,13 @@ class Config:
     sitemap_timeout_seconds: float = field(
         default_factory=lambda: _env_float("TC_SITEMAP_TIMEOUT", 30.0)
     )
+    # Link augmentation: after crawling the sitemap seed, harvest on-domain links
+    # from fetched pages and crawl new ones, this many hops deep. Catches pages a
+    # sitemap omits (or when there's no sitemap). 0 disables (sitemap-only).
+    # Bounded by max_pages_per_domain and the crawl time budget either way.
+    link_augment_rounds: int = field(
+        default_factory=lambda: _env_int("TC_LINK_AUGMENT_ROUNDS", 1)
+    )
 
     # --- chunking / embeddings (SPEC §6.4) ---
     chunk_min_tokens: int = field(

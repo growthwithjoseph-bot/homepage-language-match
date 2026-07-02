@@ -7,13 +7,20 @@ score coverage (M4). The CLI (`make crawl DOMAIN=...`) exercises just the crawl.
 from __future__ import annotations
 
 import json
+import time
 from typing import List, Optional
 
 from ..config import Config, config
 from ..db import get_connection, init_db
 from .chunk_embed import embed_run
 from .coverage import score_coverage
-from .discover import discover_urls
+from .discover import (
+    build_exclude_regex,
+    discover_urls,
+    extract_links,
+    normalize_base,
+    registrable_host,
+)
 from .extract import extract_page
 from .fetch import fetch_all
 from .topics import discover_topics
@@ -107,39 +114,78 @@ def crawl_domain(
 ) -> int:
     """Discover → fetch → extract → store pages for one domain. Returns count.
 
-    Pages are stored incrementally as each fetch completes, so per-domain page
-    counts update live during the crawl. Crawling stops at the time budget.
+    Starts from the sitemap seed, then harvests on-domain links from fetched
+    pages and follows new ones (cfg.link_augment_rounds hops) so pages a sitemap
+    omits — or a site with no sitemap — are still found. Pages are stored
+    incrementally for live progress. Bounded by max_pages and the time budget.
     """
-    urls = discover_urls(domain, max_pages=max_pages, cfg=cfg)
-    # Time budget scales with the number of URLs (stall-guard, not a coverage
-    # cap) so a large site is crawled in full — see Config.crawl_deadline_for.
-    budget = cfg.crawl_deadline_for(len(urls))
+    base = normalize_base(domain)
+    base_host = registrable_host(base)
+    exclude_re = build_exclude_regex(cfg.exclude_url_patterns)
+
+    if max_pages is None:
+        cap = cfg.max_pages_per_domain
+    elif max_pages <= 0:
+        cap = 1_000_000  # "all" (bounded by the time budget)
+    else:
+        cap = max_pages
+
+    seed = discover_urls(domain, max_pages=max_pages, cfg=cfg)
+    seen = set(seed)          # every URL queued (across rounds)
+    frontier = list(seed)     # URLs to fetch this round
+    harvested = set()         # on-domain links seen in fetched HTML
+
+    # Time budget is a stall-guard, not a coverage cap — sized to the page cap.
+    start = time.monotonic()
+    total_budget = cfg.crawl_deadline_for(cap)
+
+    def remaining():
+        return None if total_budget is None else total_budget - (time.monotonic() - start)
 
     conn = get_connection(cfg.db_path)
-    # Record how many URLs we'll try, so the UI can show scan progress
-    # (pages stored / pages discovered) live as fetches complete.
-    conn.execute(
-        "UPDATE domains SET discovered=? WHERE id=?", (len(urls), domain_id)
-    )
-    conn.commit()
     stored = {"n": 0}
+
+    def record_discovered():
+        conn.execute("UPDATE domains SET discovered=? WHERE id=?",
+                     (min(len(seen), cap), domain_id))
+        conn.commit()
 
     def handle(res):
         if not res.html:
             return
         page = extract_page(res.html, res.url, market_language=market_language)
-        if page is None:
-            return
-        conn.execute(
-            "INSERT INTO pages (domain_id, url, title, text, lang, etag) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (domain_id, page.url, page.title, page.text, page.lang, res.etag),
-        )
-        conn.commit()
-        stored["n"] += 1
+        if page is not None:
+            conn.execute(
+                "INSERT INTO pages (domain_id, url, title, text, lang, etag) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (domain_id, page.url, page.title, page.text, page.lang, res.etag),
+            )
+            conn.commit()
+            stored["n"] += 1
+        # Harvest links even from pages we don't store (nav/index pages are often
+        # thin but link to real content). res.html may be JS-rendered when the
+        # static body was too thin (see fetch._maybe_render), so this also reaches
+        # links on sitemap-less SPA sites when Playwright is installed.
+        if cfg.link_augment_rounds > 0:
+            harvested.update(extract_links(res.html, res.url, base_host, exclude_re))
 
     try:
-        fetch_all(urls, cfg=cfg, deadline_seconds=budget, on_result=handle)
+        round_i = 0
+        while frontier:
+            record_discovered()
+            rem = remaining()
+            if rem is not None and rem <= 0:
+                break
+            fetch_all(frontier, cfg=cfg, deadline_seconds=rem, on_result=handle)
+            if round_i >= cfg.link_augment_rounds or len(seen) >= cap:
+                break
+            round_i += 1
+            new_urls = [u for u in harvested if u not in seen][: cap - len(seen)]
+            if not new_urls:
+                break
+            seen.update(new_urls)
+            frontier = new_urls
+        record_discovered()
     finally:
         conn.close()
     return stored["n"]

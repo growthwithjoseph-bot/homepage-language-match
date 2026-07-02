@@ -11,9 +11,12 @@ from __future__ import annotations
 import re
 import threading
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 from ..config import Config, config
+
+# href="…" extraction for link augmentation (catches pages a sitemap omits).
+_HREF_PAT = re.compile(r"""href\s*=\s*["']([^"'#][^"']*)["']""", re.IGNORECASE)
 
 # URL path fragments that almost never point at unique article content.
 _NON_CONTENT_PAT = re.compile(
@@ -71,6 +74,26 @@ def is_content_url(url: str, base_host: str, exclude_re: Optional["re.Pattern"] 
     if exclude_re is not None and exclude_re.search(p.path or ""):
         return False
     return True
+
+
+def extract_links(html: str, page_url: str, base_host: str,
+                  exclude_re: Optional["re.Pattern"] = None) -> List[str]:
+    """On-domain content URLs linked from a page's HTML (absolute, de-fragmented,
+    deduped). Used to follow pages a sitemap misses. Skips non-http hrefs."""
+    if not html:
+        return []
+    out, seen = [], set()
+    for m in _HREF_PAT.finditer(html):
+        raw = m.group(1).strip()
+        if not raw or raw.lower().startswith(("mailto:", "tel:", "javascript:", "data:")):
+            continue
+        url = urldefrag(urljoin(page_url, raw))[0]
+        if url in seen:
+            continue
+        seen.add(url)
+        if is_content_url(url, base_host, exclude_re):
+            out.append(url)
+    return out
 
 
 def _run_with_timeout(fn, timeout: float):

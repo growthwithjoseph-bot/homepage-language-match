@@ -9,7 +9,12 @@ from backend.config import Config
 from backend.db import get_connection, init_db
 from backend.pipeline import discover as disc_mod
 from backend.pipeline import fetch as fetch_mod
-from backend.pipeline.discover import is_content_url, normalize_base, registrable_host
+from backend.pipeline.discover import (
+    extract_links,
+    is_content_url,
+    normalize_base,
+    registrable_host,
+)
 from backend.pipeline.extract import extract_page
 from backend.pipeline.fetch import FetchResult, _parse_retry_after, fetch_many
 from backend.pipeline.run import create_run, get_domains, _store_pages
@@ -58,6 +63,63 @@ def test_extract_page_from_html():
     assert page is not None
     assert page.text and "Gantt" in page.text
     assert page.lang == "en"
+
+
+def test_extract_links_keeps_on_domain_content():
+    html = '''
+      <a href="/blog/post-a">A</a>
+      <a href="https://example.com/blog/post-b">B</a>
+      <a href="/careers">skip</a>
+      <a href="/logo.png">skip</a>
+      <a href="https://other.com/x">skip</a>
+      <a href="mailto:hi@example.com">skip</a>
+      <a href="/blog/post-a#section">dupe</a>
+    '''
+    from backend.config import config
+    from backend.pipeline.discover import build_exclude_regex
+    ex = build_exclude_regex(config.exclude_url_patterns)
+    links = extract_links(html, "https://example.com/blog", "example.com", ex)
+    assert "https://example.com/blog/post-a" in links
+    assert "https://example.com/blog/post-b" in links
+    assert all("careers" not in u and "logo.png" not in u and "other.com" not in u for u in links)
+    assert len(links) == 2  # de-fragmented dupe collapses
+
+
+def test_crawl_follows_links_beyond_the_sitemap(tmp_path, monkeypatch):
+    """A page not in the sitemap but linked from one should still get crawled."""
+    from backend.config import Config
+    from backend.pipeline import run as run_mod
+    from backend.pipeline.fetch import FetchResult
+
+    cfg = Config(db_path=tmp_path / "aug.db", link_augment_rounds=1,
+                 crawl_seconds_per_url=0)  # no time limit for the test
+    init_db(cfg.db_path)
+    run_id = create_run("example.com", [], "en", 0, cfg=cfg)
+    dom = get_domains(run_id, cfg=cfg)[0]
+
+    # Sitemap only knows the homepage; the homepage links to /hidden-post.
+    monkeypatch.setattr(run_mod, "discover_urls", lambda *a, **k: ["https://example.com/"])
+    BODY = " ".join(["Turmeric skincare routines and benefits explained."] * 12)
+    pages = {
+        "https://example.com/": f"<html><body><article>{BODY}</article>"
+                                 f"<a href='/hidden-post'>hidden</a></body></html>",
+        "https://example.com/hidden-post": f"<html><body><article>{BODY}</article></body></html>",
+    }
+
+    def fake_fetch_all(urls, cfg=cfg, deadline_seconds=None, on_result=None, **k):
+        for u in urls:
+            on_result(FetchResult(url=u, status=200, html=pages.get(u), etag=None))
+
+    monkeypatch.setattr(run_mod, "fetch_all", fake_fetch_all)
+    n = run_mod.crawl_domain(dom["id"], "example.com", "en", max_pages=0, cfg=cfg)
+
+    conn = get_connection(cfg.db_path)
+    try:
+        urls = {r["url"] for r in conn.execute("SELECT url FROM pages").fetchall()}
+    finally:
+        conn.close()
+    assert "https://example.com/hidden-post" in urls  # discovered via link, not sitemap
+    assert n == 2
 
 
 def test_focused_crawl_cap_respects_requested_max(monkeypatch):
