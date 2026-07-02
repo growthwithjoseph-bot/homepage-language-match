@@ -276,13 +276,18 @@ function drawScatter() {
 // --- search history ---------------------------------------------------------
 const MAX_COMPETITORS = 5;
 
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+  document.getElementById('tab-compare').hidden = name !== 'compare';
+  document.getElementById('tab-history').hidden = name !== 'history';
+  if (name === 'history') showHistory();
+}
+
 async function showHistory() {
   const base = apiBase();
   const el = document.getElementById('history');
   if (!base || !el) return;
-  reportEl.hidden = true;
-  progressEl.hidden = true;
-  el.hidden = false;
   el.innerHTML = '<div class="muted">Loading history…</div>';
   try {
     const runs = (await (await fetch(`${base}/runs`)).json()).runs || [];
@@ -319,11 +324,19 @@ document.getElementById('analyzeForm').addEventListener('submit', (e) => {
   startAnalysis(own, comps);
 });
 
-const historyLink = document.getElementById('historyLink');
-if (historyLink) historyLink.addEventListener('click', (e) => {
+document.querySelectorAll('.tab').forEach(t =>
+  t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+// Open a past comparison without a full reload: switch to the Compare tab.
+document.getElementById('history').addEventListener('click', (e) => {
+  const a = e.target.closest('.hist-item');
+  if (!a) return;
   e.preventDefault();
-  history.replaceState(null, '', location.pathname);
-  showHistory();
+  const id = new URL(a.href, location.origin).searchParams.get('run');
+  history.replaceState(null, '', `?run=${id}`);
+  currentRunId = parseInt(id, 10);
+  showTab('compare');
+  loadReport(currentRunId);
 });
 
 reportEl.addEventListener('click', (e) => {
@@ -346,6 +359,5 @@ if (qsRun) {
       else statusEl.textContent = 'That run did not finish — start a new comparison.';
     }).catch(() => { statusEl.textContent = 'Could not load that run.'; });
   }
-} else {
-  showHistory();   // landing page: show past comparisons
 }
+// Default view is the Compare tab; History is one click away.

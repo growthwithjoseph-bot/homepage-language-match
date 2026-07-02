@@ -97,11 +97,17 @@
   .scatter .grid { stroke: var(--line); stroke-width: 1; }
   .cmp-card h3 .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
     margin-right: 7px; vertical-align: middle; }
+  /* tabs */
+  .tabs { display: flex; gap: 2px; padding: 0 24px; background: #fff;
+    border-bottom: 1px solid var(--line); }
+  .tab { border: 0; background: none; padding: 12px 16px; font-size: 13.5px; font-weight: 600;
+    color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .tab-panel[hidden] { display: none; }
+  .compose { padding: 18px 24px; border-bottom: 1px solid var(--line); background: #fff; }
   /* search history */
-  .hist-link { display: inline-block; margin-top: 10px; font-size: 12.5px; color: var(--semantic);
-    text-decoration: none; cursor: pointer; }
   #history { max-width: 1100px; margin: 0 auto; padding: 20px 24px; }
-  #history[hidden] { display: none; }
   .hist-h { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
     color: var(--muted); }
   .hist-item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
@@ -162,24 +168,35 @@
   <header>
     <h1>Homepage Language Match</h1>
     <p>How close is your homepage's messaging to your competitors' — headlines and paragraphs, by meaning and by wording.</p>
-    <form id="analyzeForm" class="form">
-      <div class="field grow">
-        <label for="ownDomain">Your domain</label>
-        <input id="ownDomain" placeholder="acme.com" autocomplete="off" required />
-      </div>
-      <div class="field grow">
-        <label for="compDomains">Competitor domains <span class="hint">(comma-separated, up to 5)</span></label>
-        <input id="compDomains" placeholder="rival.com, other.com" autocomplete="off" />
-      </div>
-      <button id="analyzeBtn" type="submit">Compare</button>
-    </form>
-    <div id="status"></div>
-    <a id="historyLink" class="hist-link" href="#">↕ Recent comparisons</a>
   </header>
 
-  <div id="progress" hidden></div>
-  <div id="history" hidden></div>
-  <div id="report" class="report" hidden></div>
+  <nav class="tabs">
+    <button type="button" class="tab active" data-tab="compare">New comparison</button>
+    <button type="button" class="tab" data-tab="history">Recent comparisons</button>
+  </nav>
+
+  <section id="tab-compare" class="tab-panel">
+    <div class="compose">
+      <form id="analyzeForm" class="form">
+        <div class="field grow">
+          <label for="ownDomain">Your domain</label>
+          <input id="ownDomain" placeholder="acme.com" autocomplete="off" required />
+        </div>
+        <div class="field grow">
+          <label for="compDomains">Competitor domains <span class="hint">(comma-separated, up to 5)</span></label>
+          <input id="compDomains" placeholder="rival.com, other.com" autocomplete="off" />
+        </div>
+        <button id="analyzeBtn" type="submit">Compare</button>
+      </form>
+      <div id="status"></div>
+    </div>
+    <div id="progress" hidden></div>
+    <div id="report" class="report" hidden></div>
+  </section>
+
+  <section id="tab-history" class="tab-panel" hidden>
+    <div id="history"></div>
+  </section>
 
   <script src="app.js"></script>
 </body>
