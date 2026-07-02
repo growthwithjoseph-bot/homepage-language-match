@@ -111,7 +111,7 @@ class Config:
     # page. Honours Retry-After (capped). Without this a throttling host (e.g.
     # Shopify/Cloudflare returning 429) silently yields zero pages.
     fetch_max_retries: int = field(
-        default_factory=lambda: _env_int("TC_FETCH_MAX_RETRIES", 3)
+        default_factory=lambda: _env_int("TC_FETCH_MAX_RETRIES", 5)
     )
     rate_limit_max_wait: float = field(
         default_factory=lambda: _env_float("TC_RATE_LIMIT_MAX_WAIT", 15.0)

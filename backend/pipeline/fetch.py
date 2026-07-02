@@ -157,11 +157,16 @@ async def fetch_many(
     results: List[FetchResult] = []
     loop = asyncio.get_event_loop()
     start = loop.time()
-    # Host-wide cooldown: when any worker is rate-limited (429/503) it pushes
-    # this timestamp forward, and every worker waits past it before its next
-    # request. This throttles the whole crawl instead of letting concurrent
-    # workers retry-storm a limiter (which just re-triggers the 429s).
-    cooldown_until = 0.0
+    # Adaptive per-host pacing (AIMD) is the ONLY throttle: `pace` is the minimum
+    # interval between request *starts* across all workers (a token bucket via
+    # `next_slot`). Spacing starts alone prevents the burst-then-429 storm — no
+    # separate host-wide cooldown, which would stack with the spacing and stall
+    # the crawl. Start fast; multiply the interval up on every 429/503, ease it
+    # back down on success: quick on tolerant sites, steadily complete on strict
+    # ones. Capped at 1s (a punitive/blocking host is bounded by the time budget).
+    PACE_MAX = 1.0
+    pace = {"delay": cfg.per_request_delay_seconds}
+    next_slot = 0.0  # earliest time the next request may start
 
     def expired() -> bool:
         return bool(deadline_seconds) and (loop.time() - start) > deadline_seconds
@@ -175,31 +180,37 @@ async def fetch_many(
     ) as client:
 
         async def worker(u: str) -> FetchResult:
-            nonlocal cooldown_until
+            nonlocal next_slot
             async with sem:
                 res = FetchResult(url=u, status=997, html=None, etag=None)
                 for attempt in range(cfg.fetch_max_retries + 1):
                     if expired():  # budget spent -> skip remaining URLs
                         return FetchResult(url=u, status=997, html=None, etag=None)
-                    wait = cooldown_until - loop.time()  # respect host cooldown
-                    if wait > 0:
-                        await asyncio.sleep(min(wait, cfg.rate_limit_max_wait))
+                    # Reserve a spaced start slot so workers don't all fire at
+                    # once and re-trip the limiter (this spacing IS the backoff).
+                    now = loop.time()
+                    start_at = max(now, next_slot)
+                    next_slot = start_at + pace["delay"]
+                    if start_at > now:
+                        await asyncio.sleep(start_at - now)
                     res = await fetch_url(client, u, robots, allow_render)
-                    if attempt < cfg.fetch_max_retries:
-                        if res.status in RETRY_STATUSES:
-                            # rate-limited / unavailable -> back off the whole host
-                            back = res.retry_after if res.retry_after is not None else 2.0 ** attempt
-                            cooldown_until = loop.time() + min(back, cfg.rate_limit_max_wait)
+                    if res.status in RETRY_STATUSES:
+                        # rate-limited: widen the spacing so the steady rate drops,
+                        # then retry (the gate re-spaces it) — don't drop the page.
+                        pace["delay"] = min(PACE_MAX, max(0.1, pace["delay"] * 2))
+                        if attempt < cfg.fetch_max_retries:
                             continue
-                        if _is_transient_error(res.status):
-                            # timeout / reset / 5xx -> retry just this URL, don't
-                            # penalise the host. This alone recovers ~20% of pages
-                            # that a single connection blip would otherwise drop.
+                        break
+                    if _is_transient_error(res.status):
+                        # timeout / reset / 5xx -> retry just this URL, don't
+                        # penalise the host. Recovers pages a connection blip drops.
+                        if attempt < cfg.fetch_max_retries:
                             await asyncio.sleep(min(2.0 ** attempt, cfg.rate_limit_max_wait))
                             continue
+                        break
+                    if 200 <= res.status < 300:  # success -> ease the spacing back down
+                        pace["delay"] = max(cfg.per_request_delay_seconds, pace["delay"] - 0.02)
                     break
-                if cfg.per_request_delay_seconds > 0:  # polite pacing per slot
-                    await asyncio.sleep(cfg.per_request_delay_seconds)
                 return res
 
         tasks = [asyncio.create_task(worker(u)) for u in urls]

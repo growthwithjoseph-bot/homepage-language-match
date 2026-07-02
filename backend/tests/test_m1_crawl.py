@@ -199,6 +199,26 @@ def test_fetch_retries_transient_network_error(monkeypatch):
     assert calls["https://x.com/net"] == 3  # two failures then success
 
 
+def test_fast_crawl_stays_complete_under_throttling(monkeypatch):
+    """Speed must not cost completeness: many URLs crawled concurrently, each
+    429'd once, must ALL be recovered (no dropped pages)."""
+    cfg = Config(fetch_max_retries=3, rate_limit_max_wait=0.01,
+                 per_host_concurrency=8, per_request_delay_seconds=0)
+    hits = {}
+
+    async def fake(client, url, robots, allow_render=True):
+        hits[url] = hits.get(url, 0) + 1
+        if hits[url] == 1:
+            return FetchResult(url=url, status=429, html=None, etag=None, retry_after=0.0)
+        return FetchResult(url=url, status=200, html=f"<html>{url}</html>", etag=None)
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", fake)
+    urls = [f"https://x.com/p{i}" for i in range(12)]
+    res = asyncio.run(fetch_many(urls, cfg=cfg))
+    assert len(res) == 12
+    assert all(r.status == 200 and r.html for r in res)  # every page recovered
+
+
 def test_fetch_gives_up_after_max_retries(monkeypatch):
     """Persistent 429 is dropped after the retry budget (no infinite loop)."""
     cfg = Config(fetch_max_retries=2, rate_limit_max_wait=0.01, per_host_concurrency=1)
