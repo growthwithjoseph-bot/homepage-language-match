@@ -33,6 +33,7 @@ from .db import (
     get_connection,
     init_db,
     list_pages,
+    list_runs,
     run_counts,
 )
 from .pipeline.run import create_run, execute_run
@@ -90,13 +91,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/runs")
+def list_runs_endpoint():
+    """Search history — recent comparisons, newest first."""
+    return {"runs": list_runs()}
+
+
 @app.post("/runs")
 def start_run(req: RunRequest):
     lang = req.market_language or config.default_market_language
     # None -> config default; 0 (or negative) -> all pages (bounded by the
     # per-domain crawl time budget); a positive value -> that cap.
     cap = config.max_pages_per_domain if req.max_pages_per_domain is None else req.max_pages_per_domain
-    run_id = create_run(req.own_domain, req.competitor_domains, lang, cap)
+    # Cap the number of competitors (product rule; also a defensive guard).
+    competitors = (req.competitor_domains or [])[: config.max_competitors]
+    run_id = create_run(req.own_domain, competitors, lang, cap)
     _run_in_background(run_id)
     return {"run_id": run_id, "status": "running"}
 

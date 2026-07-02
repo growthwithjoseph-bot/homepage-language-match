@@ -192,6 +192,10 @@ class Config:
     )
 
     # --- language-similarity scoring (homepage compare) ---
+    # Most competitor domains accepted per comparison.
+    max_competitors: int = field(
+        default_factory=lambda: _env_int("TC_MAX_COMPETITORS", 5)
+    )
     # Lexical score blends shared-vocabulary (unigram) and shared-phrasing
     # (bigram) overlap. Weights sum to 1.0; lean bigram to reward copied phrasing.
     lexical_unigram_weight: float = field(

@@ -93,14 +93,27 @@
   .scatter .axis-label { fill: var(--muted); font-size: 11px; }
   .scatter .quad-label { fill: #94a3b8; font-size: 10.5px; }
   .scatter .dot { fill: #64748b; }
-  .scatter .dot.own { fill: #16a34a; }
-  .scatter .dot-label { fill: var(--ink); font-size: 11px; font-weight: 600; }
-  .scatter .dot-label.own { fill: #16a34a; }
+  .scatter .dot-label { font-size: 11px; font-weight: 600; }
   .scatter .grid { stroke: var(--line); stroke-width: 1; }
-  .scatter-legend { display: flex; gap: 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
-  .scatter-legend .k { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-    vertical-align: middle; margin-right: 5px; }
-  .scatter-legend .k.own { background: #16a34a; } .scatter-legend .k.comp { background: #64748b; }
+  .cmp-card h3 .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    margin-right: 7px; vertical-align: middle; }
+  /* search history */
+  .hist-link { display: inline-block; margin-top: 10px; font-size: 12.5px; color: var(--semantic);
+    text-decoration: none; cursor: pointer; }
+  #history { max-width: 1100px; margin: 0 auto; padding: 20px 24px; }
+  #history[hidden] { display: none; }
+  .hist-h { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); }
+  .hist-item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    padding: 10px 14px; background: #fff; border: 1px solid var(--line); border-radius: 9px;
+    margin-bottom: 8px; text-decoration: none; color: var(--ink); }
+  .hist-item:hover { border-color: #93c5fd; background: #f8fbff; }
+  .hist-item .hi-main { font-size: 13.5px; }
+  .hist-item .hi-vs { color: var(--muted); font-size: 12px; margin: 0 2px; }
+  .hist-item .hi-meta { color: var(--muted); font-size: 12px; white-space: nowrap;
+    font-variant-numeric: tabular-nums; }
+  .hist-item .hi-status { margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+    background: #fef2f2; color: #b91c1c; font-size: 11px; }
 
   /* competitor cards */
   .cmp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
@@ -155,15 +168,17 @@
         <input id="ownDomain" placeholder="acme.com" autocomplete="off" required />
       </div>
       <div class="field grow">
-        <label for="compDomains">Competitor domains <span class="hint">(comma-separated)</span></label>
+        <label for="compDomains">Competitor domains <span class="hint">(comma-separated, up to 5)</span></label>
         <input id="compDomains" placeholder="rival.com, other.com" autocomplete="off" />
       </div>
       <button id="analyzeBtn" type="submit">Compare</button>
     </form>
     <div id="status"></div>
+    <a id="historyLink" class="hist-link" href="#">↕ Recent comparisons</a>
   </header>
 
   <div id="progress" hidden></div>
+  <div id="history" hidden></div>
   <div id="report" class="report" hidden></div>
 
   <script src="app.js"></script>

@@ -24,6 +24,11 @@ function prettyDomain(url) {
   return String(url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
 }
 
+// One distinct colour per competitor, shared between the scatter dot and its
+// card, so you can match them at a glance. (Max 5 competitors -> 5 needed.)
+const CMP_COLORS = ['#e11d48', '#16a34a', '#7c3aed', '#0891b2', '#d97706', '#2563eb'];
+const cmpColor = (i) => CMP_COLORS[i % CMP_COLORS.length];
+
 // --- "analysing" animation (dog chasing a ball through changing scenery) -----
 const CRAWL_ANIM_HTML = `
   <div class="crawl-anim" id="crawlScene">
@@ -148,7 +153,7 @@ function renderReport(rep) {
      </div>
      <p class="legend-line">Every score is a <b>0–100 similarity index</b> (not a percentage): <b>100</b> = essentially identical, <b>0</b> = unrelated. <b class="sem">Meaning</b> = same ideas, even in different words. <b class="lex">Wording</b> = the same actual words/phrases.</p>
      ${comps.length >= 1 ? scatterPanel() : ''}
-     <div class="cmp-grid">${comps.map(card).join('') || '<p class="muted">No competitors.</p>'}</div>`;
+     <div class="cmp-grid">${comps.map((c, i) => card(c, i)).join('') || '<p class="muted">No competitors.</p>'}</div>`;
   reportEl.hidden = false;
   if (comps.length) drawScatter();
   statusEl.textContent = `${prettyDomain(own.domain)} vs ${comps.length} competitor${comps.length === 1 ? '' : 's'}`;
@@ -177,14 +182,14 @@ function extractedText(m) {
   </details>`;
 }
 
-function card(c) {
+function card(c, i) {
   const s = c.scores || {};
   const chips = arr => arr && arr.length
     ? arr.map(p => `<span class="chip">${esc(p)}</span>`).join('')
     : '<span class="muted">— none —</span>';
   const whyLabel = c.explanation_ai ? 'Why · AI explains' : 'Why · how these compare';
   return `<div class="cmp-card">
-    <h3>${esc(prettyDomain(c.domain))}</h3>
+    <h3><span class="swatch" style="background:${cmpColor(i)}"></span>${esc(prettyDomain(c.domain))}</h3>
     <div class="title">${esc(c.title || '')}</div>
     <div class="gauge-group"><h4>Headlines</h4>
       ${gauge('Meaning', 'sem', s.headline_semantic)}
@@ -210,23 +215,17 @@ function scatterPanel() {
       <div class="seg">${seg('headline', 'Headlines')}${seg('paragraph', 'Paragraphs')}</div>
     </div>
     <div class="scatter" id="scatter"></div>
-    <div class="scatter-legend">
-      <span><i class="k own"></i> Your domain (100/100 — identical to itself)</span>
-      <span><i class="k comp"></i> Competitors</span>
-    </div>
   </div>`;
 }
 
 function drawScatter() {
   const el = document.getElementById('scatter');
   if (!el || !lastReport) return;
-  const pts = (lastReport.competitors || []).map(c => ({
-    name: prettyDomain(c.domain), own: false,
+  const pts = (lastReport.competitors || []).map((c, i) => ({
+    name: prettyDomain(c.domain), color: cmpColor(i),
     x: c.scores?.[`${scatterSection}_semantic`],
     y: c.scores?.[`${scatterSection}_lexical`],
   })).filter(p => p.x != null && p.y != null);
-  // Your own homepage anchors the top-right corner: it is 100% similar to itself.
-  pts.push({ name: prettyDomain(lastReport.own?.domain), own: true, x: 100, y: 100 });
 
   const W = 660, H = 380, m = { l: 54, r: 130, t: 20, b: 46 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
@@ -257,13 +256,12 @@ function drawScatter() {
 
   const dots = pts.map(p => {
     const x = px(p.x), y = py(p.y);
-    const label = p.own ? `${esc(p.name)} · you`
-                        : `${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})`;
+    const label = `${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})`;
     // Keep the label on-canvas: flip it left of the dot when near the right edge.
     const flip = x > m.l + iw - 96;
     const tx = flip ? x - 9 : x + 9, anchor = flip ? "end" : "start";
-    return `<circle class="dot ${p.own ? 'own' : ''}" cx="${x}" cy="${y}" r="${p.own ? 6 : 5}"/>`
-         + `<text class="dot-label ${p.own ? 'own' : ''}" x="${tx}" y="${y + 4}" text-anchor="${anchor}">${label}</text>`;
+    return `<circle class="dot" cx="${x}" cy="${y}" r="5" fill="${p.color}"/>`
+         + `<text class="dot-label" x="${tx}" y="${y + 4}" text-anchor="${anchor}" fill="${p.color}">${label}</text>`;
   }).join('');
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
@@ -275,14 +273,57 @@ function drawScatter() {
   </svg>`;
 }
 
+// --- search history ---------------------------------------------------------
+const MAX_COMPETITORS = 5;
+
+async function showHistory() {
+  const base = apiBase();
+  const el = document.getElementById('history');
+  if (!base || !el) return;
+  reportEl.hidden = true;
+  progressEl.hidden = true;
+  el.hidden = false;
+  el.innerHTML = '<div class="muted">Loading history…</div>';
+  try {
+    const runs = (await (await fetch(`${base}/runs`)).json()).runs || [];
+    if (!runs.length) {
+      el.innerHTML = '<div class="muted">No comparisons yet — run one above.</div>';
+      return;
+    }
+    el.innerHTML = '<h3 class="hist-h">Recent comparisons</h3>' + runs.map(r => {
+      const comps = (r.competitors || []).map(prettyDomain).join(', ') || '—';
+      const when = (r.created_at || '').replace('T', ' ').slice(0, 16);
+      const badge = r.status === 'done' ? '' : `<span class="hi-status">${esc(r.status)}</span>`;
+      return `<a class="hist-item" href="?run=${r.run_id}">
+        <span class="hi-main"><b>${esc(prettyDomain(r.own_domain))}</b>
+          <span class="hi-vs">vs</span> ${esc(comps)}</span>
+        <span class="hi-meta">${esc(when)}${badge}</span>
+      </a>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="muted">Could not load history.</div>';
+  }
+}
+
 // --- boot -------------------------------------------------------------------
 document.getElementById('analyzeForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const own = document.getElementById('ownDomain').value.trim();
   if (!own) return;
-  const comps = document.getElementById('compDomains').value
+  let comps = document.getElementById('compDomains').value
     .split(',').map(s => s.trim()).filter(Boolean);
+  if (comps.length > MAX_COMPETITORS) {
+    comps = comps.slice(0, MAX_COMPETITORS);
+    statusEl.textContent = `Up to ${MAX_COMPETITORS} competitors — comparing the first ${MAX_COMPETITORS}.`;
+  }
   startAnalysis(own, comps);
+});
+
+const historyLink = document.getElementById('historyLink');
+if (historyLink) historyLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  history.replaceState(null, '', location.pathname);
+  showHistory();
 });
 
 reportEl.addEventListener('click', (e) => {
@@ -305,4 +346,6 @@ if (qsRun) {
       else statusEl.textContent = 'That run did not finish — start a new comparison.';
     }).catch(() => { statusEl.textContent = 'Could not load that run.'; });
   }
+} else {
+  showHistory();   // landing page: show past comparisons
 }

@@ -257,6 +257,33 @@ def run_counts(conn: sqlite3.Connection, run_id: int) -> dict:
 
 # --- homepage-compare storage + report -------------------------------------
 
+def list_runs(limit: int = 100, db_path: Optional[Path] = None) -> list:
+    """Recent comparisons, newest first — for the search history."""
+    conn = get_connection(db_path)
+    try:
+        # Only homepage-compare runs (those that stored homepages) — excludes any
+        # legacy runs so a history click always loads a real report.
+        rows = conn.execute(
+            "SELECT id, own_domain, competitor_domains_json, status, created_at "
+            "FROM runs WHERE id IN "
+            "(SELECT d.run_id FROM domains d JOIN homepages h ON h.domain_id = d.id) "
+            "ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                comps = _json.loads(r["competitor_domains_json"] or "[]")
+            except Exception:
+                comps = []
+            out.append({
+                "run_id": r["id"], "own_domain": r["own_domain"],
+                "competitors": comps, "competitor_count": len(comps),
+                "status": r["status"], "created_at": r["created_at"],
+            })
+        return out
+    finally:
+        conn.close()
+
 def store_homepage(domain_id: int, content, db_path: Optional[Path] = None) -> None:
     """Save a domain's extracted homepage (headlines + paragraphs)."""
     conn = get_connection(db_path)
