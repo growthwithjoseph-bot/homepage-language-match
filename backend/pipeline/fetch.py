@@ -86,8 +86,14 @@ async def _maybe_render(url: str) -> Optional[str]:
         return None
 
 
-# Transient statuses worth retrying after a backoff (rate-limit / unavailable).
+# Rate-limit / unavailable -> retry AND slow the whole host (shared cooldown).
 RETRY_STATUSES = {429, 503}
+# Transient failures that should retry that URL only (not throttle the host):
+# status 0 is our marker for a network exception (timeout, reset, DNS blip);
+# 5xx (except 503, handled above) are transient server errors.
+NETWORK_ERROR_STATUS = 0
+def _is_transient_error(status: int) -> bool:
+    return status == NETWORK_ERROR_STATUS or (500 <= status < 600 and status != 503)
 
 
 def _parse_retry_after(resp: httpx.Response) -> Optional[float]:
@@ -179,10 +185,18 @@ async def fetch_many(
                     if wait > 0:
                         await asyncio.sleep(min(wait, cfg.rate_limit_max_wait))
                     res = await fetch_url(client, u, robots, allow_render)
-                    if res.status in RETRY_STATUSES and attempt < cfg.fetch_max_retries:
-                        back = res.retry_after if res.retry_after is not None else 2.0 ** attempt
-                        cooldown_until = loop.time() + min(back, cfg.rate_limit_max_wait)
-                        continue
+                    if attempt < cfg.fetch_max_retries:
+                        if res.status in RETRY_STATUSES:
+                            # rate-limited / unavailable -> back off the whole host
+                            back = res.retry_after if res.retry_after is not None else 2.0 ** attempt
+                            cooldown_until = loop.time() + min(back, cfg.rate_limit_max_wait)
+                            continue
+                        if _is_transient_error(res.status):
+                            # timeout / reset / 5xx -> retry just this URL, don't
+                            # penalise the host. This alone recovers ~20% of pages
+                            # that a single connection blip would otherwise drop.
+                            await asyncio.sleep(min(2.0 ** attempt, cfg.rate_limit_max_wait))
+                            continue
                     break
                 if cfg.per_request_delay_seconds > 0:  # polite pacing per slot
                     await asyncio.sleep(cfg.per_request_delay_seconds)

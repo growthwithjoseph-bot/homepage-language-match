@@ -94,6 +94,30 @@ def test_fetch_retries_then_succeeds_on_429(monkeypatch):
     assert results[0].status == 200 and results[0].html
 
 
+def test_fetch_retries_transient_network_error(monkeypatch):
+    """A connection blip (status 0) or 5xx must retry, not silently drop the page."""
+    cfg = Config(fetch_max_retries=3, rate_limit_max_wait=0.01, per_host_concurrency=2,
+                 per_request_delay_seconds=0)
+    calls = {}
+
+    async def fake(client, url, robots, allow_render=True):
+        n = calls.get(url, 0)
+        calls[url] = n + 1
+        if url.endswith("/net"):
+            return (FetchResult(url=url, status=0, html=None, etag=None) if n < 2
+                    else FetchResult(url=url, status=200, html="<html>net ok</html>", etag=None))
+        # a 500 that recovers on the 2nd try
+        return (FetchResult(url=url, status=500, html=None, etag=None) if n < 1
+                else FetchResult(url=url, status=200, html="<html>500 ok</html>", etag=None))
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", fake)
+    res = asyncio.run(fetch_many(["https://x.com/net", "https://x.com/svc"], cfg=cfg))
+    by = {r.url: r for r in res}
+    assert by["https://x.com/net"].status == 200 and by["https://x.com/net"].html
+    assert by["https://x.com/svc"].status == 200 and by["https://x.com/svc"].html
+    assert calls["https://x.com/net"] == 3  # two failures then success
+
+
 def test_fetch_gives_up_after_max_retries(monkeypatch):
     """Persistent 429 is dropped after the retry budget (no infinite loop)."""
     cfg = Config(fetch_max_retries=2, rate_limit_max_wait=0.01, per_host_concurrency=1)
