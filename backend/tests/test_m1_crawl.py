@@ -65,6 +65,36 @@ def test_extract_page_from_html():
     assert page.lang == "en"
 
 
+def test_direct_sitemap_parses_index_and_urls(monkeypatch):
+    """Our own sitemap parser (trafilatura backstop) follows an index and
+    collects every <loc>."""
+    import httpx
+    from backend.config import Config
+    from backend.pipeline import discover as disc
+
+    pages = {
+        "https://x.com/robots.txt": "User-agent: *\nSitemap: https://x.com/sitemap.xml\n",
+        "https://x.com/sitemap.xml":
+            "<sitemapindex><sitemap><loc>https://x.com/sm1.xml</loc></sitemap></sitemapindex>",
+        "https://x.com/sm1.xml":
+            "<urlset><url><loc>https://x.com/a</loc></url>"
+            "<url><loc>https://x.com/b</loc></url></urlset>",
+    }
+
+    class FakeResp:
+        def __init__(self, status, text): self.status_code, self.text = status, text
+
+    class FakeClient:
+        def __init__(self, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url): return FakeResp(200, pages[url]) if url in pages else FakeResp(404, "")
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    urls = disc._from_sitemap_direct("https://x.com", Config(), timeout=0)
+    assert "https://x.com/a" in urls and "https://x.com/b" in urls
+
+
 def test_extract_links_keeps_on_domain_content():
     html = '''
       <a href="/blog/post-a">A</a>

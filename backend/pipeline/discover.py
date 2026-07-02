@@ -128,6 +128,56 @@ def _from_sitemaps(base: str, timeout: float = 0.0) -> List[str]:
     return urls or []
 
 
+_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.IGNORECASE)
+
+
+def _from_sitemap_direct(base: str, cfg: Config, timeout: float = 0.0) -> List[str]:
+    """Fetch and parse the sitemap ourselves — a robust backstop for when
+    trafilatura's sitemap_search comes up empty (it silently fails on some hosts,
+    e.g. granola.ai, whose valid sitemap it can't read). We look at robots.txt
+    Sitemap: directives plus the common paths, follow <sitemapindex> children,
+    and collect every <loc>. Bounded by a wall-clock timeout and a sitemap cap."""
+    import httpx
+
+    def work():
+        out, seen = [], set()
+        headers = {"User-Agent": cfg.user_agent}
+        with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
+            def fetch(url):
+                try:
+                    r = client.get(url)
+                    return r.text if r.status_code == 200 else None
+                except Exception:
+                    return None
+
+            candidates = []
+            robots = fetch(base + "/robots.txt")
+            if robots:
+                for line in robots.splitlines():
+                    if line.lower().startswith("sitemap:"):
+                        candidates.append(line.split(":", 1)[1].strip())
+            candidates += [base + "/sitemap.xml", base + "/sitemap_index.xml"]
+
+            queue = list(dict.fromkeys(candidates))
+            while queue and len(seen) < 50:              # bound how many sitemaps
+                sm = queue.pop(0)
+                if sm in seen:
+                    continue
+                seen.add(sm)
+                text = fetch(sm)
+                if not text:
+                    continue
+                locs = _LOC_RE.findall(text)
+                if "<sitemapindex" in text.lower():      # index -> queue children
+                    queue.extend(l for l in locs if l not in seen)
+                else:
+                    out.extend(locs)
+        return out
+
+    urls = _run_with_timeout(work, timeout)
+    return urls or []
+
+
 def _from_focused_crawl(base: str, max_urls: int, timeout: float = 0.0) -> List[str]:
     """Sitemap-less fallback. Runs in a daemon thread with a wall-clock timeout —
     focused_crawler has no internal timeout and can hang on slow sites. On
@@ -186,8 +236,12 @@ def discover_urls(
 
     candidates = _from_sitemaps(base, cfg.sitemap_timeout_seconds)
     if not candidates:
-        # No sitemap -> follow links. Bound by the smaller of the requested cap
-        # and the focused-crawl ceiling so we don't over-crawl for a small ask.
+        # trafilatura found nothing — fetch/parse the sitemap ourselves (it
+        # silently fails on some hosts whose sitemap is perfectly valid).
+        candidates = _from_sitemap_direct(base, cfg, cfg.sitemap_timeout_seconds)
+    if not candidates:
+        # Still nothing -> no usable sitemap. Follow links, bounded by the smaller
+        # of the requested cap and the focused-crawl ceiling.
         focused_max = min(cap, cfg.focused_crawl_max_urls)
         candidates = _from_focused_crawl(
             base, focused_max, cfg.focused_crawl_timeout_seconds
