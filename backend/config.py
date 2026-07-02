@@ -242,10 +242,30 @@ class Config:
         default_factory=lambda: _env_str("TC_LLM_PROVIDER", "anthropic")
     )
     llm_model: str = field(
-        default_factory=lambda: _env_str("TC_LLM_MODEL", "claude-opus-4-8")
+        default_factory=lambda: _env_str("TC_LLM_MODEL", "qwen2.5:3b")
     )
     ollama_host: str = field(
         default_factory=lambda: _env_str("TC_OLLAMA_HOST", "http://localhost:11434")
+    )
+
+    # --- explanation LLM (homepage-compare "why") ---
+    # One OpenAI-compatible client for every provider. Default = local Ollama
+    # (free, no key). For deploy, just repoint these three env vars, e.g. Groq:
+    #   TC_LLM_BASE_URL=https://api.groq.com/openai/v1
+    #   TC_LLM_MODEL=llama-3.1-8b-instant     TC_LLM_API_KEY=gsk_...
+    # Explanation is optional: a deterministic fallback runs whenever the
+    # endpoint is unset/unreachable, so the product never breaks on the LLM.
+    explanation_enabled: bool = field(
+        default_factory=lambda: _env_bool("TC_EXPLANATION", True)
+    )
+    llm_base_url: str = field(
+        default_factory=lambda: _env_str("TC_LLM_BASE_URL", "http://localhost:11434/v1")
+    )
+    llm_api_key: str = field(
+        default_factory=lambda: _env_str("TC_LLM_API_KEY", "")
+    )
+    llm_timeout: float = field(
+        default_factory=lambda: _env_float("TC_LLM_TIMEOUT", 60.0)
     )
 
     # --- language ---
