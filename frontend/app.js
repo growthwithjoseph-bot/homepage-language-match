@@ -25,6 +25,43 @@ function apiBase() {
   return location.protocol === 'file:' ? null : location.origin;
 }
 
+// A cheerful "dog chasing a ball" scene shown in the map area while crawling —
+// pure CSS/SVG (see index.html for the keyframes), so it costs nothing to run.
+const CRAWL_ANIM_HTML = `
+  <div class="crawl-anim" id="crawlScene">
+    <svg class="crawl-scene" viewBox="0 0 280 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <line class="cs-ground" x1="8" y1="76" x2="272" y2="76" />
+      <g class="cs-ball"><g class="cs-ball-bounce">
+        <circle cx="70" cy="68" r="8" fill="#f59e0b" />
+        <circle cx="67" cy="65" r="2.5" fill="#fff" opacity=".8" />
+      </g></g>
+      <g class="cs-dog"><g class="cs-dog-bob" fill="#8b5e3c">
+        <path class="cs-tail" d="M6 56 C -4 52 -4 44 2 44 C 4 48 8 52 10 54 Z" />
+        <rect class="cs-leg cs-leg-a" x="12" y="62" width="4.5" height="14" rx="2.2" />
+        <rect class="cs-leg cs-leg-b" x="22" y="62" width="4.5" height="14" rx="2.2" />
+        <rect class="cs-leg cs-leg-a" x="33" y="62" width="4.5" height="14" rx="2.2" />
+        <rect class="cs-leg cs-leg-b" x="41" y="62" width="4.5" height="14" rx="2.2" />
+        <ellipse cx="27" cy="57" rx="21" ry="11" />
+        <circle cx="47" cy="48" r="9" />
+        <path d="M40 41 C 36 34 44 33 45 40 Z" />
+        <rect x="53" y="48" width="9" height="7" rx="3.5" />
+        <circle cx="61" cy="49" r="2" fill="#3b2a1a" />
+        <circle cx="49" cy="46" r="1.6" fill="#3b2a1a" />
+      </g></g>
+    </svg>
+    <div class="crawl-caption">
+      <span>Fetching every page we can find…</span>
+      <span>Sniffing out links the sitemap forgot…</span>
+      <span>Good boy is on the case — sit tight…</span>
+    </div>
+  </div>`;
+
+// Idempotent: don't re-inject (that would restart the animation) if it's up.
+function showCrawlAnim() {
+  if (!mapEl || document.getElementById('crawlScene')) return;
+  mapEl.innerHTML = CRAWL_ANIM_HTML;
+}
+
 // --- starting a new analysis (crawl + categorise) ---------------------------
 
 // Pipeline stages, in order, mapped to the backend's run status values.
@@ -49,7 +86,7 @@ async function startAnalysis(ownDomain, competitors, maxPages) {
   }
   analyzeBtn.disabled = true;
   detailEl.innerHTML = '<div class="empty">Analyzing… the map appears when the run finishes.</div>';
-  mapEl.innerHTML = '<div class="muted">Crawling and categorising content…</div>';
+  showCrawlAnim();
   statusEl.textContent = '';
   try {
     const res = await fetch(`${base}/runs`, {
@@ -139,6 +176,7 @@ async function pollRun(runId) {
     const info = await r.json();
     if (info.status === 'error') {
       renderProgress(info.status, info.counts, info.domains, true);
+      mapEl.innerHTML = '<div class="muted">Run failed — check the server logs.</div>';
       analyzeBtn.disabled = false;
       return;
     }
@@ -149,6 +187,7 @@ async function pollRun(runId) {
       setTimeout(() => { progressEl.hidden = true; }, 1500);
       return;
     }
+    showCrawlAnim();  // keep the dog running through all processing stages
   } catch (err) {
     statusEl.textContent = err.message;
   }

@@ -65,6 +65,39 @@
     animation: indet 1.1s ease-in-out infinite; }
   @keyframes indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
   .progress.error .bar > span { background: var(--only_comp); }
+  /* Playful "dog chasing a ball" crawl animation (shown in the map area). */
+  .crawl-anim { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; min-height: 320px; gap: 4px; }
+  .crawl-scene { width: 280px; max-width: 90%; height: auto; overflow: visible; }
+  .cs-ground { stroke: var(--line); stroke-width: 2; stroke-linecap: round; }
+  .cs-ball { animation: csBallX 3s linear infinite; }
+  .cs-ball-bounce { animation: csBounce .6s cubic-bezier(.3,0,.6,1) infinite; }
+  @keyframes csBallX { from { transform: translateX(-20px); } to { transform: translateX(250px); } }
+  @keyframes csBounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-38px); } }
+  .cs-dog { animation: csDogX 3s linear infinite; }
+  @keyframes csDogX { from { transform: translateX(-64px); } to { transform: translateX(196px); } }
+  .cs-dog-bob { animation: csBob .3s ease-in-out infinite; }
+  @keyframes csBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  .cs-leg { transform-box: fill-box; transform-origin: top center; }
+  .cs-leg-a { animation: csLeg .3s ease-in-out infinite; }
+  .cs-leg-b { animation: csLeg .3s ease-in-out infinite reverse; }
+  @keyframes csLeg { 0%,100% { transform: rotate(24deg); } 50% { transform: rotate(-24deg); } }
+  .cs-tail { transform-box: fill-box; transform-origin: left center;
+    animation: csTail .24s ease-in-out infinite; }
+  @keyframes csTail { 0%,100% { transform: rotate(-12deg); } 50% { transform: rotate(20deg); } }
+  .crawl-caption { position: relative; height: 20px; width: 320px; max-width: 90%;
+    text-align: center; margin-top: 2px; }
+  .crawl-caption span { position: absolute; left: 0; right: 0; opacity: 0; font-size: 13px;
+    color: var(--muted); animation: csCap 9s linear infinite; }
+  .crawl-caption span:nth-child(2) { animation-delay: 3s; }
+  .crawl-caption span:nth-child(3) { animation-delay: 6s; }
+  @keyframes csCap { 0% { opacity: 0; } 3% { opacity: 1; } 30% { opacity: 1; } 34% { opacity: 0; }
+    100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .cs-ball, .cs-ball-bounce, .cs-dog, .cs-dog-bob, .cs-leg-a, .cs-leg-b, .cs-tail,
+    .crawl-caption span { animation: none; }
+    .crawl-caption span:nth-child(1) { opacity: 1; }
+  }
   .pages-analysed { margin-top: 14px; display: flex; gap: 8px; align-items: center;
     flex-wrap: wrap; font-size: 12.5px; }
   .pages-analysed .pa-label { color: var(--muted); font-weight: 600; }
