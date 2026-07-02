@@ -191,6 +191,16 @@ class Config:
         )
     )
 
+    # --- language-similarity scoring (homepage compare) ---
+    # Lexical score blends shared-vocabulary (unigram) and shared-phrasing
+    # (bigram) overlap. Weights sum to 1.0; lean bigram to reward copied phrasing.
+    lexical_unigram_weight: float = field(
+        default_factory=lambda: _env_float("TC_LEXICAL_UNIGRAM_WEIGHT", 0.5)
+    )
+    lexical_bigram_weight: float = field(
+        default_factory=lambda: _env_float("TC_LEXICAL_BIGRAM_WEIGHT", 0.5)
+    )
+
     # --- topic discovery (SPEC §6.4) ---
     min_cluster_size: int = field(
         default_factory=lambda: _env_int("TC_MIN_CLUSTER_SIZE", 8)
