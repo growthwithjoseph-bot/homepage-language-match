@@ -210,6 +210,10 @@ function scatterPanel() {
       <div class="seg">${seg('headline', 'Headlines')}${seg('paragraph', 'Paragraphs')}</div>
     </div>
     <div class="scatter" id="scatter"></div>
+    <div class="scatter-legend">
+      <span><i class="k own"></i> Your domain (100/100 — identical to itself)</span>
+      <span><i class="k comp"></i> Competitors</span>
+    </div>
   </div>`;
 }
 
@@ -217,10 +221,12 @@ function drawScatter() {
   const el = document.getElementById('scatter');
   if (!el || !lastReport) return;
   const pts = (lastReport.competitors || []).map(c => ({
-    name: prettyDomain(c.domain),
+    name: prettyDomain(c.domain), own: false,
     x: c.scores?.[`${scatterSection}_semantic`],
     y: c.scores?.[`${scatterSection}_lexical`],
   })).filter(p => p.x != null && p.y != null);
+  // Your own homepage anchors the top-right corner: it is 100% similar to itself.
+  pts.push({ name: prettyDomain(lastReport.own?.domain), own: true, x: 100, y: 100 });
 
   const W = 660, H = 380, m = { l: 54, r: 130, t: 20, b: 46 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
@@ -251,8 +257,13 @@ function drawScatter() {
 
   const dots = pts.map(p => {
     const x = px(p.x), y = py(p.y);
-    return `<circle class="dot" cx="${x}" cy="${y}" r="5"/>`
-         + `<text class="dot-label" x="${x + 9}" y="${y + 4}">${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})</text>`;
+    const label = p.own ? `${esc(p.name)} · you`
+                        : `${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})`;
+    // Keep the label on-canvas: flip it left of the dot when near the right edge.
+    const flip = x > m.l + iw - 96;
+    const tx = flip ? x - 9 : x + 9, anchor = flip ? "end" : "start";
+    return `<circle class="dot ${p.own ? 'own' : ''}" cx="${x}" cy="${y}" r="${p.own ? 6 : 5}"/>`
+         + `<text class="dot-label ${p.own ? 'own' : ''}" x="${tx}" y="${y + 4}" text-anchor="${anchor}">${label}</text>`;
   }).join('');
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
