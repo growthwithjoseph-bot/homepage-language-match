@@ -22,6 +22,6 @@ COPY frontend ./frontend
 ENV TC_DB_PATH=/data/app.db
 RUN mkdir -p /data
 
-# Hosts inject $PORT; default to 8000 locally.
-ENV PORT=8000
+# Hosts inject $PORT (Render/Fly). Default 7860 = Hugging Face Spaces' port.
+ENV PORT=7860
 CMD ["sh", "-c", "uvicorn backend.app:app --host 0.0.0.0 --port ${PORT}"]

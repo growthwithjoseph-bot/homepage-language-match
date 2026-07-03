@@ -1,3 +1,13 @@
+---
+title: Homepage Language Match
+emoji: 🔤
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Homepage Language Match
 
 Compare how similar your **homepage messaging** is to your competitors'. Enter
