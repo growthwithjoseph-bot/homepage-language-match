@@ -12,6 +12,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import List
+from urllib.parse import urlparse
+
+
+def normalize_base(domain: str) -> str:
+    """Turn 'example.com' or 'http://example.com/x' into 'https://example.com'."""
+    domain = (domain or "").strip()
+    if not domain.startswith(("http://", "https://")):
+        domain = "https://" + domain
+    p = urlparse(domain)
+    return f"{p.scheme or 'https'}://{p.netloc}"
 
 # Headings up to h3; h4+ is almost always footer/legal/navigation noise.
 _HEADING_TAGS = ("h1", "h2", "h3")

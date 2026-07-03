@@ -19,7 +19,7 @@ from typing import List, Optional, Set, Tuple
 import numpy as np
 
 from ..config import Config, config
-from .chunk_embed import embed_texts
+from .embed import embed_texts
 from .homepage import HomepageContent
 
 # Compact English stopword list — enough to keep lexical overlap about content

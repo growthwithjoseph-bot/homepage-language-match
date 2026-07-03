@@ -1,27 +1,43 @@
 # CLAUDE.md — working conventions for this repo
 
-You are building **Topic Coverage**. The full spec is in `SPEC.md`. Read it first.
+You are building **Homepage Language Match**. The full spec is in `SPEC.md`. Read it first.
+
+## What it does
+Enter your domain + up to 5 competitors. For each competitor we fetch **only the
+homepage**, extract its **headlines** and **paragraphs**, and score how similar
+your messaging is to theirs on two axes — **meaning** (semantic) and **wording**
+(lexical) — for each section. An optional LLM writes a short "why". The UI shows
+per-competitor score cards, a meaning-vs-wording scatter, and a search history.
 
 ## How to work
-- **Build milestone by milestone** (SPEC §4: M0 → M6). Do not scaffold everything at once. After each milestone, make it run, pass its acceptance check, and commit before starting the next.
-- After each milestone, briefly state what you built and how you verified it.
-- Prefer small, readable modules matching the layout in SPEC §10.
+- Keep modules small and readable; match the layout in SPEC §7.
+- After a change, make it run and pass its check before moving on. Verify the app
+  in the browser when a change is visible there.
+- Commit logical units; never commit secrets (see below).
 
 ## Hard rules (do not drift)
-- **Coverage only.** No demand, no "white space", no authority scoring. If you're tempted to add any, stop — those are explicitly out of scope (SPEC §1, §12).
-- **Topics are content-driven** (clustered from crawled content), never a hardcoded list.
-- **All thresholds in `config.py`** (δ parity band, similarity threshold, page caps, cluster sizes) — never hardcoded in logic.
-- **Must run locally with no paid API keys**: default to local embeddings (`sentence-transformers`) and term-based topic labels; treat hosted embeddings / LLM labels as optional upgrades behind config.
-- **Be polite when crawling**: respect `robots.txt`, rate-limit per host, honour `max_pages_per_domain`.
-- **Determinism where it matters**: the coverage state function (SPEC §6.6) is a pure rule, not a model.
+- **Homepage only.** One page per domain — no crawling, sitemaps, or multi-page
+  discovery. (That was the previous tool; it's gone.)
+- **Scores are deterministic.** The four sub-scores are a pure function of the
+  extracted text + embeddings (SPEC §4). No LLM in the number. Same input → same
+  score. The LLM only writes the prose explanation.
+- **Runs locally with no paid keys.** Default to local embeddings
+  (`sentence-transformers`) and local/no LLM. Hosted embeddings and the LLM are
+  optional upgrades behind config, always with a deterministic fallback.
+- **All thresholds in `config.py`** (lexical weights, max competitors, LLM
+  settings, embedding model) — never hardcoded in logic.
+- **LLM is provider-agnostic and optional.** One OpenAI-compatible client
+  (`explain.py`) via `TC_LLM_BASE_URL` / `TC_LLM_MODEL` / `TC_LLM_API_KEY`. Works
+  with Ollama (local), Groq (free tier), etc. If it's unset or unreachable, the
+  deterministic fallback runs — the tool never breaks on the LLM.
+- **Secrets only in `.env`** (gitignored). Never hardcode a key or commit one.
 
-## Commands (define these in the Makefile)
-- `make dev` — run FastAPI with reload
+## Commands (Makefile)
+- `make dev` — run FastAPI with reload on :8000 (serves the API + frontend)
 - `make test` — run tests
-- `make crawl DOMAIN=example.com` — crawl one domain (handy for M1 debugging)
-
-## Verifying each milestone
-Use the per-milestone acceptance checks in SPEC §4. Add a tiny test or a CLI command per stage so you can prove it works on one real domain before wiring the next stage.
+- `make install` / `make install-ml` — core deps / local embedding model deps
 
 ## Frontend
-Port the layout from `reference/radial-map.js` (a working radial generator). Build the UI against `reference/sample-map.json` first (no backend needed), then point it at the real `/runs/{id}/map` endpoint. Colour nodes by coverage state using the palette in SPEC §2/§9.
+Static `frontend/` (index.html + app.js) served by FastAPI. Two tabs: **New
+comparison** (form → report: cards + scatter) and **Recent comparisons**
+(history). Each competitor has a stable colour shared by its scatter dot and card.

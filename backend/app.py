@@ -25,16 +25,11 @@ from pydantic import BaseModel, Field
 
 from .config import config
 from .db import (
-    build_map,
     build_report,
-    build_topic_detail,
-    domain_page_counts,
     fail_orphaned_runs,
     get_connection,
     init_db,
-    list_pages,
     list_runs,
-    run_counts,
 )
 from .pipeline.run import create_run, execute_run
 
@@ -69,7 +64,6 @@ class RunRequest(BaseModel):
     own_domain: str
     competitor_domains: List[str] = Field(default_factory=list)
     market_language: Optional[str] = None
-    max_pages_per_domain: Optional[int] = None
 
 
 # --- background execution ---------------------------------------------------
@@ -100,25 +94,21 @@ def list_runs_endpoint():
 @app.post("/runs")
 def start_run(req: RunRequest):
     lang = req.market_language or config.default_market_language
-    # None -> config default; 0 (or negative) -> all pages (bounded by the
-    # per-domain crawl time budget); a positive value -> that cap.
-    cap = config.max_pages_per_domain if req.max_pages_per_domain is None else req.max_pages_per_domain
     # Cap the number of competitors (product rule; also a defensive guard).
     competitors = (req.competitor_domains or [])[: config.max_competitors]
-    run_id = create_run(req.own_domain, competitors, lang, cap)
+    run_id = create_run(req.own_domain, competitors, lang)
     _run_in_background(run_id)
     return {"run_id": run_id, "status": "running"}
 
 
 @app.get("/runs/{run_id}")
 def run_status(run_id: int):
+    """Run status (the UI polls this until 'done', then reads /report)."""
     conn = get_connection()
     try:
         run = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         if run is None:
             raise HTTPException(404, "run not found")
-        counts = run_counts(conn, run_id)
-        domains = domain_page_counts(conn, run_id)
     finally:
         conn.close()
     return {
@@ -127,8 +117,6 @@ def run_status(run_id: int):
         "own_domain": run["own_domain"],
         "created_at": run["created_at"],
         "finished_at": run["finished_at"],
-        "counts": counts,
-        "domains": domains,
     }
 
 
@@ -141,36 +129,7 @@ def run_report(run_id: int):
     return data
 
 
-@app.get("/runs/{run_id}/map")
-def run_map(run_id: int):
-    data = build_map(run_id)
-    if data is None:
-        raise HTTPException(404, "run not found")
-    return data
-
-
-@app.get("/runs/{run_id}/topics/{topic_id}")
-def topic_detail(run_id: int, topic_id: int):
-    data = build_topic_detail(run_id, topic_id)
-    if data is None:
-        raise HTTPException(404, "topic not found")
-    return data
-
-
-@app.get("/runs/{run_id}/pages")
-def run_pages(run_id: int):
-    """Every scraped page for the run, grouped by domain (for the page list)."""
-    conn = get_connection()
-    try:
-        exists = conn.execute("SELECT 1 FROM runs WHERE id=?", (run_id,)).fetchone()
-    finally:
-        conn.close()
-    if not exists:
-        raise HTTPException(404, "run not found")
-    return {"run_id": run_id, "domains": list_pages(run_id)}
-
-
-# --- static frontend (M6) ---------------------------------------------------
+# --- static frontend --------------------------------------------------------
 # Served last so it doesn't shadow the API routes above.
 class _NoCacheStatic(StaticFiles):
     """StaticFiles that tells the browser to always revalidate. Without this the
