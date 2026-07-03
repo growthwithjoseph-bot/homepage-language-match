@@ -1,0 +1,20 @@
+# Render blueprint — deploys the whole app (API + frontend) as one web service.
+# Set the LLM secrets in the Render dashboard (never commit them).
+services:
+  - type: web
+    name: homepage-language-match
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # ~1 GB RAM — the free 512 MB tier may OOM the model
+    healthCheckPath: /health
+    envVars:
+      - key: TC_LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: TC_LLM_MODEL
+        value: llama-3.1-8b-instant
+      - key: TC_LLM_API_KEY
+        sync: false        # set in the dashboard (secret)
+    disk:                  # persist the SQLite history across deploys
+      name: data
+      mountPath: /data
+      sizeGB: 1
