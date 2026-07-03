@@ -214,6 +214,8 @@ function scatterPanel() {
       <h3>Positioning — meaning vs wording</h3>
       <div class="seg">${seg('headline', 'Headlines')}${seg('paragraph', 'Paragraphs')}</div>
     </div>
+    <p class="scatter-note">Both axes are a <b>0–100 similarity index</b> — not a percentage.
+      Higher = more similar to your homepage. Dots show <code>(meaning, wording)</code>.</p>
     <div class="scatter" id="scatter"></div>
   </div>`;
 }

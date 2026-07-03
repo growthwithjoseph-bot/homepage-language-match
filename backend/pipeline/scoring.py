@@ -79,11 +79,54 @@ def _bigrams(tokens: List[str]) -> Set[Tuple[str, str]]:
     return set(zip(tokens, tokens[1:]))
 
 
+# Industry-neutral marketing copy. Its embedding centroid is the "generic
+# homepage" direction — shared by *every* marketing page regardless of topic.
+# Removing it before scoring is what stops two unrelated sites (e.g. an AI
+# notetaker vs a skincare brand) from scoring ~90 on meaning just for both being
+# marketing pages. See semantic scoring below.
+_GENERIC_MARKETING = [
+    "Get started today", "Try it for free", "Start your free trial", "Book a demo",
+    "Trusted by thousands of teams", "Join thousands of happy customers",
+    "Built for modern teams", "Everything you need in one place",
+    "Save time and get more done", "Work smarter not harder",
+    "The all-in-one platform", "Powerful, simple, and fast",
+    "Loved by teams worldwide", "See why customers love us",
+    "Sign up in seconds", "No credit card required", "Grow your business",
+    "Made for you", "Simple, transparent pricing", "Contact our sales team",
+    "Learn more", "Watch the video", "We help you do more with less",
+    "Our platform makes it easy for your team to collaborate and get results faster",
+]
+_GENERIC_CENTROID: dict = {}
+
+
+def _generic_centroid(cfg: Config) -> np.ndarray:
+    """Cached unit vector of the 'generic marketing homepage' direction."""
+    key = cfg.local_embedding_model
+    vec = _GENERIC_CENTROID.get(key)
+    if vec is None:
+        m = embed_texts(_GENERIC_MARKETING, cfg).mean(axis=0)
+        n = float(np.linalg.norm(m))
+        vec = (m / n if n else m).astype(np.float32)
+        _GENERIC_CENTROID[key] = vec
+    return vec
+
+
+def _remove_generic(vecs: np.ndarray, cfg: Config) -> np.ndarray:
+    """Project out the generic-marketing direction from each row, then renormalise
+    — leaving only what's topically distinctive about this page."""
+    g = _generic_centroid(cfg)
+    resid = vecs - np.outer(vecs @ g, g)
+    norms = np.linalg.norm(resid, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return resid / norms
+
+
 def _profile_section(items: List[str], cfg: Config) -> SectionProfile:
     items = [i for i in items if i.strip()]
     if not items:
         return SectionProfile(n_items=0, mean_vec=None)
-    vecs = embed_texts(items, cfg)          # already L2-normalised rows
+    vecs = embed_texts(items, cfg)          # L2-normalised rows
+    vecs = _remove_generic(vecs, cfg)       # strip the shared "marketing copy" direction
     mean = vecs.mean(axis=0)
     norm = float(np.linalg.norm(mean))
     mean = mean / norm if norm else mean
