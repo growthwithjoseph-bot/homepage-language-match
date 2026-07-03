@@ -1,15 +1,14 @@
-"""FastAPI application for Topic Coverage (SPEC §8).
+"""FastAPI application for Homepage Language Match.
 
 Endpoints:
   GET  /health
-  POST /runs                     start an analysis (runs in the background)
-  GET  /runs/{id}                status + counts
-  GET  /runs/{id}/map            the category→topic coverage tree
-  GET  /runs/{id}/topics/{tid}   per-topic detected content
+  POST /runs                start a comparison (runs in the background)
+  GET  /runs                search history (recent comparisons)
+  GET  /runs/{id}           run status
+  GET  /runs/{id}/report    own summary + per-competitor similarity scores
 
 A run executes in a background thread so POST returns immediately with a
-run_id (SPEC §8: returns {run_id, status:"running"}). The pipeline is otherwise
-synchronous; poll GET /runs/{id} for progress.
+run_id; poll GET /runs/{id} until 'done', then read the report.
 """
 from __future__ import annotations
 
@@ -49,7 +48,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Topic Coverage", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Homepage Language Match", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

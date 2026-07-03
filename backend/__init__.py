@@ -1,1 +1,1 @@
-"""Topic Coverage backend package."""
+"""Homepage Language Match backend package."""

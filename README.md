@@ -1,48 +1,47 @@
-# Topic Coverage
+# Homepage Language Match
 
-Crawl a brand's site and its competitors', discover the topics each writes about, and see — as a radial map — **who covers what, and who covers it more**. A pure content-coverage comparison (no demand, no authority).
+Compare how similar your **homepage messaging** is to your competitors'. Enter
+your domain and up to 5 competitors; for each, the tool fetches **only the
+homepage**, pulls out its **headlines** and **paragraphs**, and scores the
+similarity of your messaging to theirs on two axes:
 
-See **`SPEC.md`** for the full build specification and **`CLAUDE.md`** for working conventions.
+- **Meaning (semantic)** — do they say the *same things*, even in different words?
+- **Wording (lexical)** — do they use the *same actual words/phrases*?
 
-## Quickstart (target state once built)
+…for headlines and for paragraphs (four 0–100 scores per competitor), plus an
+optional LLM-written explanation of *why*. It's a **messaging-analysis** tool —
+no crawling, no SEO, no keyword or authority scoring.
+
+See **`SPEC.md`** for the full spec, **`CLAUDE.md`** for conventions, and
+**`DEPLOY.md`** to put it online.
+
+## Quickstart
 
 ```bash
-# 1. install
-make install            # or: pip install -e .  &&  playwright install chromium
+make install-ml          # deps incl. the local embedding model
+make dev                 # FastAPI + UI on http://localhost:8000
+```
 
-# 2. run the API
-make dev                # FastAPI on http://localhost:8000
+Open http://localhost:8000, enter your domain and competitors, and hit
+**Compare**. Or via the API:
 
-# 3. start an analysis
+```bash
 curl -X POST localhost:8000/runs \
   -H 'content-type: application/json' \
-  -d '{"own_domain":"asana.com","competitor_domains":["monday.com","clickup.com","notion.so"]}'
-
-# 4. open the UI
-open http://localhost:8000/?run=1   # radial coverage map, served by the API
+  -d '{"own_domain":"fathom.ai","competitor_domains":["otter.ai","fireflies.ai"]}'
+# then poll GET /runs/{id} until "done", and read GET /runs/{id}/report
 ```
 
-The pipeline needs the ML stack for embeddings + topic discovery:
-
-```bash
-make install        # core deps (crawl + extract + API)
-make install-ml     # sentence-transformers + BERTopic stack (M2–M3)
-```
-
-### Try it offline (no crawl, no keys)
-
-```bash
-python -m backend.pipeline.demo   # seeds a reproducible 4-domain run
-make dev                          # then open http://localhost:8000/?run=1
-```
-
-The demo seeds crawled-equivalent content for one own domain + three
-competitors; topics are still **discovered by clustering** that content (not
-hardcoded), so it exercises the full embed → topics → coverage → map path
-without hitting the network.
-
-## How it works (one line)
-crawl → extract clean content → chunk + embed → cluster into topics (across all domains) → score each domain's coverage per topic → render the radial map.
+## How it works
+fetch each homepage → extract headlines + paragraphs (lxml) → embed locally and
+compute **deterministic** semantic + lexical scores (you vs each competitor) →
+optional LLM "why" → show per-competitor cards, a meaning-vs-wording scatter, and
+a search history.
 
 ## Runs with no API keys
-Defaults to local embeddings (`sentence-transformers`) and term-based topic labels, so it works offline. Add an embeddings/LLM provider via `.env` for higher-quality labels (optional).
+Scores use **local embeddings** (`sentence-transformers`) — no key needed, and
+they're fully deterministic (same input → same score). The LLM explanation is
+**optional and provider-agnostic** (one OpenAI-compatible client): point it at
+local **Ollama** or a free **Groq** key via `TC_LLM_BASE_URL` / `TC_LLM_MODEL` /
+`TC_LLM_API_KEY`; if it's unset or unreachable, a deterministic explanation is
+used instead. Keys live only in a gitignored `.env` — never in the repo.

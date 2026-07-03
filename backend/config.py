@@ -1,4 +1,4 @@
-"""Central configuration for Topic Coverage.
+"""Central configuration for Homepage Language Match.
 
 Every threshold, cap, and model choice lives here (CLAUDE.md hard rule:
 "All thresholds in config.py — never hardcoded in logic"). Values default to
