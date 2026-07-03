@@ -1,20 +1,27 @@
-# Render blueprint — deploys the whole app (API + frontend) as one web service.
-# Set the LLM secrets in the Render dashboard (never commit them).
+# Render blueprint — deploys the whole app (API + frontend) with NO Docker.
+# Render builds straight from the repo; you just set the LLM key as a secret.
 services:
   - type: web
     name: homepage-language-match
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    runtime: python
     plan: starter          # ~1 GB RAM — the free 512 MB tier may OOM the model
     healthCheckPath: /health
+    buildCommand: >-
+      pip install -e ".[ml]" &&
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')"
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: TC_DB_PATH
+        value: /data/app.db
       - key: TC_LLM_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: TC_LLM_MODEL
         value: llama-3.1-8b-instant
       - key: TC_LLM_API_KEY
-        sync: false        # set in the dashboard (secret)
-    disk:                  # persist the SQLite history across deploys
+        sync: false          # set in the dashboard (secret)
+    disk:                    # persist the SQLite history across deploys
       name: data
       mountPath: /data
       sizeGB: 1

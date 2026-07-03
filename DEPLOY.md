@@ -1,9 +1,28 @@
 # Deploying Homepage Language Match
 
-The app is one FastAPI service that also serves the frontend, so you deploy a
-single container and get one public URL. The LLM uses an OpenAI-compatible
-endpoint (default: **Groq**, free tier) — set as env vars on the host, never
-committed.
+The app is one FastAPI service that also serves the frontend, so you deploy it
+once and get one public URL. The LLM uses an OpenAI-compatible endpoint
+(default: **Groq**, free tier) — set as env vars on the host, never committed.
+
+> **Not Netlify.** Netlify only hosts static sites + small JS functions; this has
+> a Python + ML backend, so it needs a Python host. The good news: **no Docker
+> required** — the hosts below build from your GitHub repo. Pick one:
+
+## Easiest — Render, no Docker (recommended)
+1. Push this repo to GitHub.
+2. On [render.com](https://render.com): **New → Blueprint** → pick the repo.
+   `render.yaml` sets everything (build/start commands, disk, env).
+3. In **Environment**, set `TC_LLM_API_KEY` to your Groq key (`gsk_…`).
+4. Deploy → you get a `https://…onrender.com` URL. (Starter plan ~$7/mo for the
+   RAM the model needs.)
+
+## Free — Hugging Face Spaces (great for ML, generous RAM)
+1. Create a **Space** → SDK: **Docker** → push this repo (HF builds the
+   `Dockerfile` for you; no local Docker needed).
+2. In the Space **Settings → Variables and secrets**, set `TC_LLM_BASE_URL`,
+   `TC_LLM_MODEL`, and secret `TC_LLM_API_KEY`.
+3. It builds and gives you a public `…hf.space` URL. Free CPU tier has plenty of
+   RAM for the embedding model.
 
 ## Option A — quick shareable link today (no deploy)
 Run locally and expose it with a tunnel:
@@ -17,35 +36,12 @@ ngrok http 8000               # or: cloudflared tunnel --url http://localhost:80
 ngrok prints a public `https://…` URL your friend can open. It's live only while
 your laptop + `make dev` are running.
 
-## Option B — persistent deploy (Render)
-1. Push this repo to GitHub.
-2. On [render.com](https://render.com): **New → Blueprint**, point it at the repo.
-   `render.yaml` provisions a Docker web service with a 1 GB disk for history.
-3. In the service's **Environment**, set `TC_LLM_API_KEY` to your Groq key
-   (`gsk_…` from console.groq.com). The base URL + model are already set.
-4. Deploy. Render builds the `Dockerfile` and gives you a
-   `https://homepage-language-match.onrender.com` URL.
-
-**RAM:** the embedding model needs ~1 GB, so use the **Starter** plan (the free
-512 MB tier can OOM). To go lighter/free, set the LLM off and swap the embedding
-model, or host the embeddings via an API.
-
-## Option C — Fly.io
+## Also fine — Fly.io or a Docker host
+A `Dockerfile` is included if you prefer a container host (Fly.io, a VPS, etc.):
 ```bash
-fly launch --dockerfile Dockerfile --no-deploy   # generates fly.toml
-fly volumes create data --size 1                  # persist /data
+fly launch --no-deploy && fly volumes create data --size 1
 fly secrets set TC_LLM_API_KEY=gsk_...            # + base url / model
 fly deploy
-```
-
-## Run the container locally (to test the image)
-```bash
-docker build -t hlm .
-docker run -p 8000:8000 \
-  -e TC_LLM_BASE_URL=https://api.groq.com/openai/v1 \
-  -e TC_LLM_MODEL=llama-3.1-8b-instant \
-  -e TC_LLM_API_KEY=gsk_your_key \
-  hlm
 ```
 
 ## Notes
