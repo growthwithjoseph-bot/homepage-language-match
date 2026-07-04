@@ -214,8 +214,9 @@ function scatterPanel() {
       <h3>Positioning — meaning vs wording</h3>
       <div class="seg">${seg('headline', 'Headlines')}${seg('paragraph', 'Paragraphs')}</div>
     </div>
-    <p class="scatter-note">Both axes are a <b>0–100 similarity index</b> — not a percentage.
-      Higher = more similar to your homepage. Dots show <code>(meaning, wording)</code>.</p>
+    <p class="scatter-note">Scores are a <b>0–100 similarity index</b> — not a percentage.
+      Higher = more similar to your homepage. Each axis zooms to fit the scores (even, round steps);
+      dots show <code>(meaning, wording)</code>.</p>
     <div class="scatter" id="scatter"></div>
   </div>`;
 }
@@ -229,41 +230,53 @@ function drawScatter() {
     y: c.scores?.[`${scatterSection}_lexical`],
   })).filter(p => p.x != null && p.y != null);
 
-  const W = 660, H = 380, m = { l: 54, r: 130, t: 20, b: 46 };
+  const W = 660, H = 380, m = { l: 48, r: 130, t: 20, b: 46 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b;
-  // Auto-fit each axis to the data (scores cluster in a narrow band), with padding.
-  const fit = (vals) => {
-    let lo = Math.min(...vals), hi = Math.max(...vals);
-    if (hi - lo < 1) { lo -= 5; hi += 5; }             // avoid zero range
-    const pad = (hi - lo) * 0.18;
-    return [Math.max(0, lo - pad), Math.min(100, hi + pad)];
+  // Both axes start at 0 with equal, round steps (2, 5, 10, 20…) and a ceiling
+  // that adapts to the data — so gaps are uniform, values are round, dots sit
+  // exactly on their gridlines, and the chart isn't mostly empty when (e.g.)
+  // wording scores are all small.
+  const niceScale = (maxVal) => {
+    const top = Math.max(maxVal, 1) * 1.15;
+    const mag = Math.pow(10, Math.floor(Math.log10(top)));
+    let step = mag;
+    for (const s of [1, 2, 2.5, 5, 10]) { step = s * mag; if (top / step <= 6) break; }
+    const hi = Math.ceil(top / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= hi + step * 1e-6; v += step) ticks.push(Math.round(v * 100) / 100);
+    return { hi, ticks };
   };
-  const [x0, x1] = fit(pts.map(p => p.x));
-  const [y0, y1] = fit(pts.map(p => p.y));
-  const px = v => m.l + ((v - x0) / (x1 - x0)) * iw;
-  const py = v => m.t + ih - ((v - y0) / (y1 - y0)) * ih;
+  const ax = niceScale(Math.max(...pts.map(p => p.x)));
+  const ay = niceScale(Math.max(...pts.map(p => p.y)));
+  const px = v => m.l + (v / ax.hi) * iw;
+  const py = v => m.t + ih - (v / ay.hi) * ih;
 
-  // Gridlines + numeric tick labels on both axes so values are readable.
-  const ticks = [0, 0.25, 0.5, 0.75, 1];
-  const gridTicks = ticks.map(f => {
-    const gx = m.l + f * iw, gy = m.t + ih - f * ih;
-    const xv = Math.round(x0 + f * (x1 - x0)), yv = Math.round(y0 + f * (y1 - y0));
-    const lines = (f > 0 && f < 1)
-      ? `<line class="grid" x1="${gx}" y1="${m.t}" x2="${gx}" y2="${m.t + ih}"/>`
-      + `<line class="grid" x1="${m.l}" y1="${gy}" x2="${m.l + iw}" y2="${gy}"/>` : '';
-    return lines
-      + `<text class="tick" x="${gx}" y="${m.t + ih + 16}" text-anchor="middle">${xv}</text>`
-      + `<text class="tick" x="${m.l - 8}" y="${gy + 4}" text-anchor="end">${yv}</text>`;
+  const gridTicks = ax.ticks.map(v => {
+    const gx = px(v);
+    const line = (v > 0 && v < ax.hi)
+      ? `<line class="grid" x1="${gx}" y1="${m.t}" x2="${gx}" y2="${m.t + ih}"/>` : '';
+    return line + `<text class="tick" x="${gx}" y="${m.t + ih + 16}" text-anchor="middle">${v}</text>`;
+  }).join('') + ay.ticks.map(v => {
+    const gy = py(v);
+    const line = (v > 0 && v < ay.hi)
+      ? `<line class="grid" x1="${m.l}" y1="${gy}" x2="${m.l + iw}" y2="${gy}"/>` : '';
+    return line + `<text class="tick" x="${m.l - 8}" y="${gy + 4}" text-anchor="end">${v}</text>`;
   }).join('');
 
+  // Place labels; nudge vertically (away from the nearer edge) when two would
+  // collide, so clustered dots stay legible.
+  const placed = [];
   const dots = pts.map(p => {
     const x = px(p.x), y = py(p.y);
-    const label = `${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})`;
-    // Keep the label on-canvas: flip it left of the dot when near the right edge.
     const flip = x > m.l + iw - 96;
     const tx = flip ? x - 9 : x + 9, anchor = flip ? "end" : "start";
+    const dir = y > m.t + ih / 2 ? -1 : 1;               // bottom dots -> label up
+    let ly = y + 4;
+    while (placed.some(q => Math.abs(q.x - tx) < 100 && Math.abs(q.y - ly) < 13)) ly += dir * 13;
+    placed.push({ x: tx, y: ly });
+    const label = `${esc(p.name)} (${Math.round(p.x)}, ${Math.round(p.y)})`;
     return `<circle class="dot" cx="${x}" cy="${y}" r="5" fill="${p.color}"/>`
-         + `<text class="dot-label" x="${tx}" y="${y + 4}" text-anchor="${anchor}" fill="${p.color}">${label}</text>`;
+         + `<text class="dot-label" x="${tx}" y="${ly}" text-anchor="${anchor}" fill="${p.color}">${label}</text>`;
   }).join('');
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
