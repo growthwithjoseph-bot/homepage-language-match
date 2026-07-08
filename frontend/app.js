@@ -336,6 +336,7 @@ document.getElementById('analyzeForm').addEventListener('submit', (e) => {
     comps = comps.slice(0, MAX_COMPETITORS);
     statusEl.textContent = `Up to ${MAX_COMPETITORS} competitors — comparing the first ${MAX_COMPETITORS}.`;
   }
+  if (window.trackRun) window.trackRun(own, comps);   // log submitted domains
   startAnalysis(own, comps);
 });
 
